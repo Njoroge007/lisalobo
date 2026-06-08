@@ -71,16 +71,18 @@ export async function executeTradeViaOTP(
     }, 20_000);
 
     ws.onopen = () => {
-      // Step 3: Send proposal immediately — the OTP URL IS the authentication
+      // Send buy directly — the OTP URL IS the authentication; no proposal step needed
       ws.send(JSON.stringify({
-        proposal: 1,
-        amount: stake,
-        basis: "stake",
-        contract_type: contractType,  // "CALL" | "PUT"
-        currency: "USD",
-        duration: clampedDuration,
-        duration_unit: durationUnit,  // "t"|"s"|"m"|"h"|"d"
-        symbol: "R_75",
+        buy: 1,
+        price: stake,
+        parameters: {
+          amount: stake,
+          basis: "stake",
+          contract_type: contractType,  // "CALL" | "PUT"
+          currency: "USD",
+          duration: clampedDuration,
+          duration_unit: durationUnit,  // "t"|"s"|"m"|"h"|"d"
+        },
         req_id: 1,
       }));
     };
@@ -96,17 +98,7 @@ export async function executeTradeViaOTP(
         return;
       }
 
-      // Step 4: Proposal received — buy immediately
-      if (d.msg_type === "proposal" && d.proposal?.id) {
-        ws.send(JSON.stringify({
-          buy: d.proposal.id,
-          price: stake,
-          req_id: 2,
-        }));
-        return;
-      }
-
-      // Step 5: Buy confirmed
+      // Buy confirmed
       if (d.msg_type === "buy" && d.buy) {
         clearTimeout(timeout);
         ws.close();
