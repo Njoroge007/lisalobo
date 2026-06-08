@@ -375,7 +375,7 @@ function AuthPanel({
                   const u = e.target.value as DurationUnit;
                   const lim = DURATION_LIMITS[u];
                   setTradeDurationUnit(u);
-                  setTradeDuration(Math.max(lim.min, Math.min(lim.max, tradeDuration)));
+                  setTradeDuration(prev => Math.max(lim.min, Math.min(lim.max, prev)));
                 }}
                 className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-violet-500 cursor-pointer"
               >
@@ -569,7 +569,7 @@ export function V75Analyzer() {
     try {
       const contractType = sig.direction === "RISE" ? "CALL" : "PUT";
       const result = await executeTradeViaOTP(API, acctId, contractType, stake, dur, durUnit);
-      setContracts((prev: any) => [{
+      setContracts(prev => [{
         signalId: sig.id, contractId: result.contractId, direction: sig.direction,
         signalPrice: sig.entryPrice, derivPrice: result.buyPrice,
         slippage: result.buyPrice - sig.entryPrice, timestamp: Date.now(),
@@ -600,7 +600,7 @@ export function V75Analyzer() {
       const contractType = direction === "RISE" ? "CALL" : "PUT";
       const result = await executeTradeViaOTP(API, acctId, contractType, stake, dur, durUnit);
       const p = priceRef.current;
-      setContracts((prev: any) => [{
+      setContracts(prev => [{
         signalId: `manual-${Date.now()}`, contractId: result.contractId, direction,
         signalPrice: p, derivPrice: result.buyPrice,
         slippage: result.buyPrice - p, timestamp: Date.now(),
@@ -616,7 +616,7 @@ export function V75Analyzer() {
     const sig = engine.processTick(tickPrice, epoch * 1000, atrRef.current);
     if (!sig) return;
 
-    setSignals((prev: any) => [sig, ...prev].slice(0, 50));
+    setSignals(prev => [sig, ...prev].slice(0, 50));
     saveSignal(sig);
 
     if (executionModeRef.current === "AUTO") {
@@ -644,7 +644,7 @@ export function V75Analyzer() {
 
   // ── Deriv public tick client ──
   useEffect(() => {
-    const client = new DerivClient({ onTick: handleTick, onM1: handleM1, onM5: () => {}, onM15: () => {}, onH1: () => {}, onH4: () => {}, onState: setConn });
+    const client = new DerivClient({ onTick: handleTick, onM1: handleM1, onM5: () => {}, onM15: () => {}, onState: setConn });
     client.start();
     return () => client.stop();
   }, [handleTick, handleM1]);

@@ -25,15 +25,11 @@ export async function executeTradeViaOTP(
   durationUnit: DurationUnit = "m",
 ): Promise<TradeResult> {
   const token = getAccessToken();
-  if (!token)     throw new Error("Not authenticated — please log in again");
+  if (!token)    throw new Error("Not authenticated — please log in again");
   if (!accountId) throw new Error("No account selected");
 
   const limits = DURATION_LIMITS[durationUnit];
   const clampedDuration = Math.max(limits.min, Math.min(limits.max, Math.round(duration)));
-
-  // Determine correct symbol: real accounts use R_75, demo accounts use R_75
-  // Deriv uses R_75 for Volatility 75 Index on both real and demo
-  const underlying_symbol = "R_75";
 
   const otpRes = await fetch(`${apiBase}/deriv/ws-token`, {
     method: "POST",
@@ -51,7 +47,6 @@ export async function executeTradeViaOTP(
 
   return new Promise<TradeResult>((resolve, reject) => {
     const ws = new WebSocket(wsUrl);
-    let proposalId: string | null = null;
 
     const timeout = setTimeout(() => {
       ws.close();
@@ -59,16 +54,17 @@ export async function executeTradeViaOTP(
     }, 20_000);
 
     ws.onopen = () => {
-      // Step 1: Request a proposal first
       ws.send(JSON.stringify({
-        proposal: 1,
-        amount: stake,
-        basis: "stake",
-        contract_type: contractType,
-        currency: "USD",
-        duration: clampedDuration,
-        duration_unit: durationUnit,
-        symbol: underlying_symbol,
+        buy: 1,
+        price: stake,
+        parameters: {
+          amount: stake,
+          basis: "stake",
+          contract_type: contractType,
+          currency: "USD",
+          duration: clampedDuration,
+          duration_unit: durationUnit
+        },
         req_id: 1,
       }));
     };
@@ -84,17 +80,6 @@ export async function executeTradeViaOTP(
         return;
       }
 
-      // Step 2: Got proposal — now buy it
-      if (d.msg_type === "proposal" && d.proposal?.id) {
-        proposalId = d.proposal.id;
-        ws.send(JSON.stringify({
-          buy: proposalId,
-          price: stake,
-          req_id: 2,
-        }));
-      }
-
-      // Step 3: Buy confirmed
       if (d.msg_type === "buy" && d.buy) {
         clearTimeout(timeout);
         ws.close();
