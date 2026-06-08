@@ -9,12 +9,15 @@ export interface TradeResult {
 }
 
 /** Min/max valid values per duration unit for R_75 Rise/Fall contracts */
-export const DURATION_LIMITS: Record<DurationUnit, { min: number; max: number; label: string }> = {
-  t: { min: 1,  max: 10,   label: "ticks"   },
+export const DURATION_LIMITS: Record<
+  DurationUnit,
+  { min: number; max: number; label: string }
+> = {
+  t: { min: 1, max: 10, label: "ticks" },
   s: { min: 15, max: 3600, label: "seconds" },
-  m: { min: 1,  max: 1440, label: "minutes" },
-  h: { min: 1,  max: 24,   label: "hours"   },
-  d: { min: 1,  max: 365,  label: "days"    },
+  m: { min: 1, max: 1440, label: "minutes" },
+  h: { min: 1, max: 24, label: "hours" },
+  d: { min: 1, max: 365, label: "days" },
 };
 
 /**
@@ -40,11 +43,14 @@ export async function executeTradeViaOTP(
   durationUnit: DurationUnit = "m",
 ): Promise<TradeResult> {
   const token = getAccessToken();
-  if (!token)    throw new Error("Not authenticated — please log in again");
+  if (!token) throw new Error("Not authenticated — please log in again");
   if (!accountId) throw new Error("No account selected");
 
   const limits = DURATION_LIMITS[durationUnit];
-  const clampedDuration = Math.max(limits.min, Math.min(limits.max, Math.round(duration)));
+  const clampedDuration = Math.max(
+    limits.min,
+    Math.min(limits.max, Math.round(duration)),
+  );
 
   // ── Step 1: Get a fresh OTP WebSocket URL from the backend proxy ────────────
   const otpRes = await fetch(`${apiBase}/deriv/ws-token`, {
@@ -55,7 +61,9 @@ export async function executeTradeViaOTP(
 
   if (!otpRes.ok) {
     const body = await otpRes.json().catch(() => ({}));
-    throw new Error(body.error || `Failed to get trade session (${otpRes.status})`);
+    throw new Error(
+      body.error || `Failed to get trade session (${otpRes.status})`,
+    );
   }
 
   const { wsUrl } = await otpRes.json();
@@ -72,24 +80,30 @@ export async function executeTradeViaOTP(
 
     ws.onopen = () => {
       // Send buy directly — the OTP URL IS the authentication; no proposal step needed
-      ws.send(JSON.stringify({
-        buy: 1,
-        price: stake,
-        parameters: {
-          amount: stake,
-          basis: "stake",
-          contract_type: contractType,  // "CALL" | "PUT"
-          currency: "USD",
-          duration: clampedDuration,
-          duration_unit: durationUnit,  // "t"|"s"|"m"|"h"|"d"
-        },
-        req_id: 1,
-      }));
+      ws.send(
+        JSON.stringify({
+          buy: 1,
+          price: stake,
+          parameters: {
+            amount: stake,
+            basis: "stake",
+            contract_type: contractType, // "CALL" | "PUT"
+            currency: "USD",
+            duration: clampedDuration,
+            duration_unit: durationUnit, // "t"|"s"|"m"|"h"|"d"
+          },
+          req_id: 1,
+        }),
+      );
     };
 
     ws.onmessage = (ev) => {
       let d: any;
-      try { d = JSON.parse(ev.data as string); } catch { return; }
+      try {
+        d = JSON.parse(ev.data as string);
+      } catch {
+        return;
+      }
 
       if (d.error) {
         clearTimeout(timeout);
@@ -104,8 +118,8 @@ export async function executeTradeViaOTP(
         ws.close();
         resolve({
           contractId: d.buy.contract_id ?? 0,
-          buyPrice:   parseFloat(d.buy.buy_price ?? "0"),
-          longcode:   d.buy.longcode ?? "",
+          buyPrice: parseFloat(d.buy.buy_price ?? "0"),
+          longcode: d.buy.longcode ?? "",
         });
       }
     };
