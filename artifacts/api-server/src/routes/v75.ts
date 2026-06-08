@@ -12,7 +12,7 @@ router.post("/ws-token", async (req, res) => {
     }
 
     // Direct connection endpoint to Deriv App production WebSocket API
-    const targetWs = `wss://ws.derivws.com/websockets/v3?app_id=1089&token=${accessToken}`;
+    const targetWs = `wss://ws.derivws.com/websockets/v3?app_id=33uTkAzdOo9TdI46YlHdQ&token=${accessToken}`;
     
     return res.json({ wsUrl: targetWs });
   } catch (error: any) {

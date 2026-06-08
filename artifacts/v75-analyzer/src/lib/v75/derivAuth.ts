@@ -3,7 +3,7 @@ const REDIRECT_URI = "https://volatility-75--lisalobo89.replit.app/";
 const AUTH_ENDPOINT = "https://auth.deriv.com/oauth2/auth";
 
 // Same host that DerivClient uses for tick data — confirmed to work in-browser
-const DERIV_WS_HOST = "wss://api.derivws.com/trading/v1/options/ws/public";
+const DERIV_WS_HOST = "wss://ws.derivws.com/websockets/v3?app_id=33uTkAzdOo9TdI46YlHdQ";
 
 // Module-level token store — intentionally lost on page refresh
 let _accessToken: string | null = null;
