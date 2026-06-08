@@ -644,7 +644,7 @@ export function V75Analyzer() {
 
   // ── Deriv public tick client ──
   useEffect(() => {
-    const client = new DerivClient({ onTick: handleTick, onM1: handleM1, onM5: () => {}, onM15: () => {}, onState: setConn });
+    const client = new DerivClient({ onTick: handleTick, onM1: handleM1, onM5: () => {}, onM15: () => {}, onH1: () => {}, onH4: () => {}, onState: setConn });
     client.start();
     return () => client.stop();
   }, [handleTick, handleM1]);
