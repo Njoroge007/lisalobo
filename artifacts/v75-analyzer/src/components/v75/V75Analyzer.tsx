@@ -26,17 +26,48 @@ interface ContractRecord {
   signalPrice: number; derivPrice: number; slippage: number; timestamp: number;
 }
 
-// ── Z-Score Goldilocks Gauge ──────────────────────────────────────────────────
+// ── EMA Trend Display (The River) ─────────────────────────────────────────────
+function EMADisplay({ price, ema }: { price: number; ema: number }) {
+  const isUp = price > ema;
+  const color = isUp ? "#10b981" : "#f43f5e";
+  const label = isUp ? "RIVER FLOWING UP ▲" : "RIVER FLOWING DOWN ▼";
+  const diff = Math.abs(price - ema);
+  
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-between items-baseline">
+        <span className="text-xs uppercase tracking-widest text-zinc-400">Macro Trend</span>
+        <span className="text-[10px] text-zinc-500 font-mono">50-tick EMA</span>
+      </div>
+      <div className="text-3xl font-mono font-bold" style={{ color }}>{ema.toFixed(2)}</div>
+      <div className="relative h-4 bg-zinc-800 rounded-full overflow-hidden">
+         <div className="absolute inset-y-0 left-1/2 w-px bg-zinc-500" />
+         <div className="absolute inset-y-0 rounded-full transition-all duration-300" 
+              style={{ 
+                left: isUp ? "50%" : `calc(50% - ${Math.min(50, diff * 10)}%)`,
+                width: `${Math.min(50, diff * 10)}%`,
+                background: color,
+                opacity: 0.8
+              }} />
+      </div>
+      <div className="text-xs font-mono font-semibold" style={{ color }}>{label}</div>
+    </div>
+  );
+}
+
+// ── Z-Score Goldilocks Gauge (Recalibrated for 1.0 - 2.2) ───────────────────
 function ZGoldilocks({ z }: { z: number }) {
   const clamped = Math.max(-4, Math.min(4, z));
   const pct = ((clamped + 4) / 8) * 100;
   const absZ = Math.abs(z);
-  const inGoldilocks = absZ >= 1.5 && absZ <= 2.5;
-  const overExtended = absZ > 2.5;
+  const inGoldilocks = absZ >= 1.0 && absZ <= 2.2;
+  const overExtended = absZ > 2.2;
   const dotColor = inGoldilocks ? "#10b981" : overExtended ? "#f43f5e" : "#64748b";
-  const label = inGoldilocks ? "GOLDILOCKS ✓" : overExtended ? "OVEREXTENDED" : absZ > 0 ? "TOO WEAK" : "FLAT";
-  const gl1S = ((-2.5 + 4) / 8) * 100; const gl1E = ((-1.5 + 4) / 8) * 100;
-  const gl2S = ((1.5 + 4) / 8) * 100;  const gl2E = ((2.5 + 4) / 8) * 100;
+  const label = inGoldilocks ? "MOMENTUM ✓" : overExtended ? "EXHAUSTED" : absZ > 0 ? "BUILDING" : "FLAT";
+  
+  const gl1S = ((-2.2 + 4) / 8) * 100; const gl1E = ((-1.0 + 4) / 8) * 100;
+  const gl2S = ((1.0 + 4) / 8) * 100;  const gl2E = ((2.2 + 4) / 8) * 100;
+  
   return (
     <div className="space-y-3">
       <div className="flex justify-between items-baseline">
@@ -48,37 +79,11 @@ function ZGoldilocks({ z }: { z: number }) {
         <div className="absolute inset-y-0 rounded-sm" style={{ left: `${gl1S}%`, width: `${gl1E - gl1S}%`, background: "#10b98130", border: "1px solid #10b98150" }} />
         <div className="absolute inset-y-0 rounded-sm" style={{ left: `${gl2S}%`, width: `${gl2E - gl2S}%`, background: "#10b98130", border: "1px solid #10b98150" }} />
         <div className="absolute inset-y-0 w-px bg-zinc-600" style={{ left: "50%" }} />
-        {[gl1S, gl1E, gl2S, gl2E].map((p, i) => <div key={i} className="absolute inset-y-0 w-px bg-emerald-500/50" style={{ left: `${p}%` }} />)}
         <div className="absolute top-1/2 w-3.5 h-3.5 rounded-full -translate-y-1/2 transition-all duration-150 shadow-lg" style={{ left: `calc(${pct}% - 7px)`, background: dotColor }} />
       </div>
       <div className="flex justify-between text-[9px] text-zinc-600 font-mono">
-        <span>−4</span><span className="text-emerald-600">−2.5</span><span className="text-emerald-600">−1.5</span><span>0</span><span className="text-emerald-600">+1.5</span><span className="text-emerald-600">+2.5</span><span>+4</span>
+        <span>−4</span><span className="text-emerald-600">−2.2</span><span className="text-emerald-600">−1.0</span><span>0</span><span className="text-emerald-600">+1.0</span><span className="text-emerald-600">+2.2</span><span>+4</span>
       </div>
-    </div>
-  );
-}
-
-// ── Hurst Display ─────────────────────────────────────────────────────────────
-function HurstDisplay({ h }: { h: number }) {
-  const isTrending = h >= 0.55;
-  const color = isTrending ? "#10b981" : h >= 0.5 ? "#f59e0b" : "#f43f5e";
-  const label = isTrending ? "TRENDING ✓" : h >= 0.5 ? "BORDERLINE" : "MEAN-REVERTING ✗";
-  return (
-    <div className="space-y-3">
-      <div className="flex justify-between items-baseline">
-        <span className="text-xs uppercase tracking-widest text-zinc-400">Hurst Exponent</span>
-        <span className="text-[10px] text-zinc-500 font-mono">H</span>
-      </div>
-      <div className="text-3xl font-mono font-bold" style={{ color }}>{h.toFixed(4)}</div>
-      <div className="relative h-4 bg-zinc-800 rounded-full overflow-hidden">
-        <div className="absolute left-0 right-[45%] inset-y-0 opacity-15 rounded-l-full" style={{ background: "#f43f5e" }} />
-        <div className="absolute left-[55%] right-0 inset-y-0 opacity-20 rounded-r-full" style={{ background: "#10b981" }} />
-        <div className="absolute inset-y-0 w-px bg-zinc-500" style={{ left: "45%" }} />
-        <div className="absolute inset-y-0 w-px bg-emerald-500/70" style={{ left: "55%" }} />
-        <div className="absolute top-1/2 w-3.5 h-3.5 rounded-full -translate-y-1/2 transition-all duration-300 shadow-lg" style={{ left: `calc(${Math.min(100, h * 100)}% - 7px)`, background: color }} />
-      </div>
-      <div className="flex justify-between text-[9px] text-zinc-600 font-mono"><span>0</span><span>0.45</span><span className="text-emerald-600">0.55</span><span>1.0</span></div>
-      <div className="text-xs font-mono font-semibold" style={{ color }}>{label}</div>
     </div>
   );
 }
@@ -140,6 +145,7 @@ function DTIGauge({ dti, zScore }: { dti: number; zScore: number }) {
 function EngineStatePanel({ state, countdownMs, activeSignal }: { state: EngineState; countdownMs: number; activeSignal: SnapbackSignal | null }) {
   const sec = Math.ceil(countdownMs / 1000);
   const pct = state === "IN_TRADE" ? ((120_000 - countdownMs) / 120_000) * 100 : 0;
+  
   if (state === "IN_TRADE" && activeSignal) {
     const isRise = activeSignal.direction === "RISE";
     return (
@@ -168,6 +174,7 @@ function EngineStatePanel({ state, countdownMs, activeSignal }: { state: EngineS
       </div>
     );
   }
+  
   if (state === "RESETTING") {
     return (
       <div className="rounded-xl border border-amber-500/40 bg-zinc-900 p-5 space-y-2">
@@ -177,10 +184,11 @@ function EngineStatePanel({ state, countdownMs, activeSignal }: { state: EngineS
       </div>
     );
   }
+  
   return (
     <div className="rounded-xl border border-emerald-500/30 bg-zinc-900 p-5 space-y-2">
       <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /><span className="text-sm font-semibold tracking-widest text-emerald-300 uppercase">IDLE</span><span className="ml-auto text-xs text-zinc-500">Scanning for momentum…</span></div>
-      <p className="text-xs text-zinc-500">Waiting for: <span className="text-zinc-300">H ≥ 0.55</span>{" · "}<span className="text-zinc-300">1.5 ≤ |Z| ≤ 2.5</span>{" · "}<span className="text-zinc-300">Vel ≥ 1.2×</span>{" · "}<span className="text-zinc-300">|DTI| ≥ 0.70</span></p>
+      <p className="text-xs text-zinc-500">Waiting for: <span className="text-zinc-300">Trend Align</span>{" · "}<span className="text-zinc-300">1.0 ≤ |Z| ≤ 2.2</span>{" · "}<span className="text-zinc-300">Vel ≥ 1.2×</span>{" · "}<span className="text-zinc-300">|DTI| ≥ 0.70</span></p>
     </div>
   );
 }
@@ -206,7 +214,6 @@ function SignalRow({ sig, contract }: { sig: SnapbackSignal; contract?: Contract
         <span className="text-zinc-400">{time}</span>
         <span className="text-zinc-300">{fmt2(sig.entryPrice)}</span>
         <span className="text-zinc-500">Z={sig.zScore >= 0 ? "+" : ""}{sig.zScore.toFixed(2)}</span>
-        <span className="text-zinc-500">H={sig.hurstExponent.toFixed(2)}</span>
         <span className="text-zinc-500">DTI={(sig.dti ?? 0) >= 0 ? "+" : ""}{(sig.dti ?? 0).toFixed(2)}</span>
         <span className={`ml-auto px-1.5 py-0.5 rounded text-[10px] ${sig.outcome === "WIN" ? "bg-emerald-500/15 text-emerald-400" : sig.outcome === "LOSS" ? "bg-rose-500/15 text-rose-400" : "bg-zinc-700/40 text-zinc-400"}`}>{sig.outcome}</span>
       </div>
@@ -229,94 +236,46 @@ function AuthPanel({
   authStatus, authError, accounts, selectedAccountId, setSelectedAccountId,
   executionMode, setExecutionMode,
   stakeAmount, setStakeAmount, tpLimit, setTpLimit, slLimit, setSlLimit,
-  tradeDuration, setTradeDuration, tradeDurationUnit, setTradeDurationUnit,
   pendingManualSignal, manualCountdown, onManualExecute, onManualRise, onManualFall, onLogin, onLogout,
   allGates, execError,
-}: {
-  authStatus: AuthStatus; authError: string;
-  accounts: DerivAccount[]; selectedAccountId: string; setSelectedAccountId: (id: string) => void;
-  executionMode: ExecMode; setExecutionMode: (m: ExecMode) => void;
-  stakeAmount: number; setStakeAmount: (n: number) => void;
-  tpLimit: number; setTpLimit: (n: number) => void;
-  slLimit: number; setSlLimit: (n: number) => void;
-  tradeDuration: number; setTradeDuration: (n: number) => void;
-  tradeDurationUnit: DurationUnit; setTradeDurationUnit: (u: DurationUnit) => void;
-  pendingManualSignal: SnapbackSignal | null; manualCountdown: number;
-  onManualExecute: () => void; onManualRise: () => void; onManualFall: () => void;
-  onLogin: () => void; onLogout: () => void;
-  allGates: boolean; execError: string;
-}) {
-  const selectedAccount = accounts.find(a => a.id === selectedAccountId);
+}: any) {
+  const selectedAccount = accounts.find((a: any) => a.id === selectedAccountId);
   const canManualExecute = pendingManualSignal !== null && manualCountdown > 0 && authStatus === "connected";
-  const safeUnit: DurationUnit = tradeDurationUnit ?? "m";
-  const durLimits = DURATION_LIMITS[safeUnit] ?? DURATION_LIMITS["m"];
 
   return (
     <div className="space-y-4">
-      {/* ── Auth Status ── */}
+      {/* Auth Status */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
         <div className="text-xs uppercase tracking-widest text-zinc-500">Auth Status</div>
-
         {authStatus === "not-connected" && (
           <>
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-zinc-500" />
-              <span className="text-xs font-semibold text-zinc-400">Not Connected</span>
-            </div>
+            <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-zinc-500" /><span className="text-xs font-semibold text-zinc-400">Not Connected</span></div>
             {authError && <p className="text-[10px] text-rose-400">{authError}</p>}
-            <p className="text-xs text-zinc-500">Login to enable live trade execution via Deriv API.</p>
-            <button
-              onClick={onLogin}
-              className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-lg bg-[#ff444f] hover:bg-[#e03040] transition-colors text-white text-sm font-semibold"
-            >
+            <button onClick={onLogin} className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-lg bg-[#ff444f] hover:bg-[#e03040] transition-colors text-white text-sm font-semibold">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
               Login with Deriv
             </button>
-            <p className="text-[10px] text-zinc-600 text-center">OAuth 2.0 + PKCE — token never stored</p>
           </>
         )}
-
         {authStatus === "connecting" && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
-              <span className="text-xs font-semibold text-amber-300">Connecting…</span>
-            </div>
-            <p className="text-[10px] text-zinc-500">Exchanging authorization code…</p>
-          </div>
+          <div className="flex items-center gap-2"><div className="w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" /><span className="text-xs font-semibold text-amber-300">Connecting…</span></div>
         )}
-
         {authStatus === "error" && (
           <>
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-rose-500" />
-              <span className="text-xs font-semibold text-rose-400">Error</span>
-            </div>
+            <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-rose-500" /><span className="text-xs font-semibold text-rose-400">Error</span></div>
             <p className="text-[10px] text-rose-400">{authError}</p>
             <button onClick={onLogin} className="w-full py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 transition-colors">Try Again</button>
           </>
         )}
-
         {authStatus === "connected" && selectedAccount && (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                <span className="text-xs font-semibold text-emerald-300">Connected</span>
-              </div>
+              <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-400" /><span className="text-xs font-semibold text-emerald-300">Connected</span></div>
               <button onClick={onLogout} className="text-[10px] text-zinc-500 hover:text-zinc-300 underline">Logout</button>
             </div>
             {accounts.length > 1 ? (
-              <select
-                value={selectedAccountId}
-                onChange={e => setSelectedAccountId(e.target.value)}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-violet-500"
-              >
-                {accounts.map(a => (
-                  <option key={a.id} value={a.id}>
-                    {a.loginId} · {a.type} · {a.currency} {fmt2(a.balance)}
-                  </option>
-                ))}
+              <select value={selectedAccountId} onChange={e => setSelectedAccountId(e.target.value)} className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-violet-500">
+                {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.loginId} · {a.type} · {a.currency} {fmt2(a.balance)}</option>)}
               </select>
             ) : (
               <div className="text-xs font-mono text-zinc-300">
@@ -328,17 +287,16 @@ function AuthPanel({
         )}
       </div>
 
-      {/* ── Execution Mode ── */}
+      {/* Execution Mode */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
         <div className="text-xs uppercase tracking-widest text-zinc-500">Execution Mode</div>
         <div className="flex rounded-lg overflow-hidden border border-zinc-700">
           <button className={`flex-1 py-2 text-xs font-semibold transition-colors ${executionMode === "MANUAL" ? "bg-violet-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"}`} onClick={() => setExecutionMode("MANUAL")}>MANUAL</button>
           <button className={`flex-1 py-2 text-xs font-semibold transition-colors ${executionMode === "AUTO" ? "bg-emerald-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"}`} onClick={() => setExecutionMode("AUTO")}>AUTO</button>
         </div>
-        <p className="text-[10px] text-zinc-500">{executionMode === "AUTO" ? "Trades fire instantly when all 4 gates open." : "Signal highlights Execute button for 10s."}</p>
       </div>
 
-      {/* ── Risk Settings ── */}
+      {/* Risk Settings */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
         <div className="text-xs uppercase tracking-widest text-zinc-500">Risk Settings</div>
         <div className="space-y-2">
@@ -353,101 +311,44 @@ function AuthPanel({
                 className="mt-1 w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-1.5 text-sm font-mono text-white focus:outline-none focus:border-violet-500" />
             </label>
           ))}
-
-          {/* Duration picker */}
+          
+          {/* Protected Duration Input */}
           <div>
-            <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Duration</span>
+            <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Duration (Protected)</span>
             <div className="mt-1 flex gap-1.5">
-              <input
-                type="number"
-                min={durLimits.min}
-                max={durLimits.max}
-                step="1"
-                value={tradeDuration}
-                onChange={e => {
-                  setTradeDuration(Math.max(durLimits.min, Math.min(durLimits.max, Number(e.target.value))));
-                }}
-                className="w-20 bg-zinc-800 border border-zinc-700 rounded px-3 py-1.5 text-sm font-mono text-white focus:outline-none focus:border-violet-500"
-              />
-              <select
-                value={safeUnit}
-                onChange={e => {
-                  const u = e.target.value as DurationUnit;
-                  const lim = DURATION_LIMITS[u];
-                  setTradeDurationUnit(u);
-                  setTradeDuration(prev => Math.max(lim.min, Math.min(lim.max, prev)));
-                }}
-                className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-violet-500 cursor-pointer"
-              >
-                <option value="t">ticks</option>
-                <option value="s">seconds</option>
+              <input type="number" value={2} readOnly className="w-20 bg-zinc-800 border border-zinc-700/50 rounded px-3 py-1.5 text-sm font-mono text-emerald-500/70 focus:outline-none cursor-not-allowed" />
+              <select value="m" disabled className="flex-1 bg-zinc-800 border border-zinc-700/50 rounded px-2 py-1.5 text-sm text-emerald-500/70 focus:outline-none cursor-not-allowed">
                 <option value="m">minutes</option>
-                <option value="h">hours</option>
-                <option value="d">days</option>
               </select>
             </div>
-            <p className="text-[10px] text-zinc-600 mt-0.5">
-              {durLimits.min}–{durLimits.max} {durLimits.label}
-            </p>
+            <p className="text-[10px] text-zinc-600 mt-0.5">Locked to 2m for Momentum Strategy</p>
           </div>
         </div>
       </div>
 
-      {/* ── Manual Execute Buttons ── */}
+      {/* Manual Controls */}
       {executionMode === "MANUAL" && (
         <div className="space-y-2">
-          {/* Engine signal alert */}
           {canManualExecute && pendingManualSignal && (
             <div className="bg-violet-900/30 border border-violet-500/40 rounded-lg px-3 py-2 text-xs font-mono space-y-1 animate-pulse">
               <div className="text-violet-300 font-semibold">⚡ Signal Ready ({manualCountdown}s)</div>
               <div className="text-zinc-300">{pendingManualSignal.direction === "RISE" ? "▲ RISE" : "▼ FALL"} @ {fmt2(pendingManualSignal.entryPrice)}</div>
-              <div className="text-zinc-500">Z={pendingManualSignal.zScore.toFixed(2)} · DTI={(pendingManualSignal.dti ?? 0).toFixed(2)}</div>
-              <button onClick={onManualExecute}
-                className="mt-1 w-full py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-colors">
-                Execute Signal Direction
-              </button>
+              <button onClick={onManualExecute} className="mt-1 w-full py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-colors">Execute Signal Direction</button>
             </div>
           )}
-          {/* Manual RISE / FALL buttons */}
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Manual Trade</div>
           <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={onManualRise}
-              disabled={authStatus !== "connected"}
-              className={`py-3 rounded-xl text-sm font-bold tracking-wide transition-all ${
-                authStatus === "connected"
-                  ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20"
-                  : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
-              }`}>
-              ▲ RISE
-            </button>
-            <button
-              onClick={onManualFall}
-              disabled={authStatus !== "connected"}
-              className={`py-3 rounded-xl text-sm font-bold tracking-wide transition-all ${
-                authStatus === "connected"
-                  ? "bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-500/20"
-                  : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
-              }`}>
-              ▼ FALL
-            </button>
+            <button onClick={onManualRise} disabled={authStatus !== "connected"} className={`py-3 rounded-xl text-sm font-bold tracking-wide transition-all ${authStatus === "connected" ? "bg-emerald-600 hover:bg-emerald-500 text-white" : "bg-zinc-800 text-zinc-600 cursor-not-allowed"}`}>▲ RISE</button>
+            <button onClick={onManualFall} disabled={authStatus !== "connected"} className={`py-3 rounded-xl text-sm font-bold tracking-wide transition-all ${authStatus === "connected" ? "bg-rose-600 hover:bg-rose-500 text-white" : "bg-zinc-800 text-zinc-600 cursor-not-allowed"}`}>▼ FALL</button>
           </div>
-          {authStatus !== "connected" && (
-            <p className="text-[10px] text-zinc-600 text-center">Login required to trade</p>
-          )}
           {execError && <p className="text-[10px] text-rose-400 text-center">{execError}</p>}
         </div>
       )}
 
-      {/* ── Auto status ── */}
+      {/* Auto Controls */}
       {executionMode === "AUTO" && (
         <div className={`rounded-xl border p-4 text-xs text-center space-y-1 ${authStatus === "connected" ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-400" : "border-zinc-700 bg-zinc-800/50 text-zinc-500"}`}>
-          {authStatus === "connected"
-            ? <>
-                <div>⚡ Auto-fire active</div>
-                <div className="text-emerald-600">${stakeAmount} stake · {tradeDuration} {DURATION_LIMITS[tradeDurationUnit].label}</div>
-              </>
-            : <div>Connect your Deriv account to execute trades.</div>}
+          {authStatus === "connected" ? <><div>⚡ Auto-fire active</div><div className="text-emerald-600">${stakeAmount} stake · 2 minutes</div></> : <div>Connect your Deriv account to execute trades.</div>}
           {execError && <p className="text-rose-400 mt-1">{execError}</p>}
         </div>
       )}
@@ -478,8 +379,6 @@ export function V75Analyzer() {
   const [stakeAmount, setStakeAmount] = useState(10);
   const [tpLimit, setTpLimit] = useState(100);
   const [slLimit, setSlLimit] = useState(50);
-  const [tradeDuration, setTradeDuration] = useState(2);
-  const [tradeDurationUnit, setTradeDurationUnit] = useState<DurationUnit>("m");
   const [pendingManualSignal, setPendingManualSignal] = useState<SnapbackSignal | null>(null);
   const [manualCountdown, setManualCountdown] = useState(0);
   const [execError, setExecError] = useState("");
@@ -488,28 +387,20 @@ export function V75Analyzer() {
   const priceRef = useRef(0);
   const executionModeRef = useRef<ExecMode>("MANUAL");
   const stakeRef = useRef(10);
-  const tradeDurationRef = useRef(2);
-  const tradeDurationUnitRef = useRef<DurationUnit>("m");
   const selectedAccountRef = useRef("");
   const pendingManualRef = useRef<SnapbackSignal | null>(null);
 
   useEffect(() => { executionModeRef.current = executionMode; }, [executionMode]);
   useEffect(() => { stakeRef.current = stakeAmount; }, [stakeAmount]);
-  useEffect(() => { tradeDurationRef.current = tradeDuration; }, [tradeDuration]);
-  useEffect(() => { tradeDurationUnitRef.current = tradeDurationUnit; }, [tradeDurationUnit]);
   useEffect(() => { selectedAccountRef.current = selectedAccountId; }, [selectedAccountId]);
   useEffect(() => { pendingManualRef.current = pendingManualSignal; }, [pendingManualSignal]);
 
-  // ── OAuth callback on mount ──
+  // OAuth on mount
   useEffect(() => {
     (async () => {
       const result = await handleOAuthCallback(API);
       if (result.status === "none") return;
-      if (result.status === "error") {
-        setAuthStatus("not-connected");
-        setAuthError(result.message);
-        return;
-      }
+      if (result.status === "error") { setAuthStatus("not-connected"); setAuthError(result.message); return; }
       if (result.status === "connected") {
         setAuthStatus("connecting");
         try {
@@ -520,14 +411,13 @@ export function V75Analyzer() {
           selectedAccountRef.current = data[0]?.id ?? "";
           setAuthStatus("connected");
         } catch (e: any) {
-          setAuthStatus("not-connected");
-          setAuthError(e?.message ?? "Failed to load accounts");
+          setAuthStatus("not-connected"); setAuthError(e?.message ?? "Failed to load accounts");
         }
       }
     })();
   }, []);
 
-  // ── Manual countdown ──
+  // Manual countdown
   useEffect(() => {
     if (!pendingManualSignal) return;
     const start = Date.now();
@@ -540,7 +430,7 @@ export function V75Analyzer() {
     return () => clearInterval(id);
   }, [pendingManualSignal]);
 
-  // ── Engine poll ──
+  // Engine poll
   useEffect(() => {
     const id = setInterval(() => {
       setEngineState(engine.getState());
@@ -550,17 +440,25 @@ export function V75Analyzer() {
     return () => clearInterval(id);
   }, []);
 
+  // Reconstructed load signals block
   useEffect(() => {
-    loadSignals(30).then(sigs => { setSignals(sigs); setLoading(false); });
-    flushQueue();
+    loadSignals().then(loaded => {
+      setSignals(loaded);
+      setLoading(false);
+    }).catch(err => {
+      console.error(err);
+      setLoading(false);
+    });
   }, []);
 
-  // ── Trade execution ──
   const fireTrade = useCallback(async (sig: SnapbackSignal) => {
     const acctId = selectedAccountRef.current;
     const stake = stakeRef.current;
-    const dur = tradeDurationRef.current;
-    const durUnit = tradeDurationUnitRef.current;
+    
+    // HARDCODED TO PROTECTED 2-MINUTE WINDOW
+    const dur = 2;
+    const durUnit = "m";
+    
     if (!acctId || !getAccessToken()) {
       setExecError("Connect your Deriv account to execute trades.");
       return;
@@ -589,12 +487,9 @@ export function V75Analyzer() {
   const fireDirectionTrade = useCallback(async (direction: "RISE" | "FALL") => {
     const acctId = selectedAccountRef.current;
     const stake = stakeRef.current;
-    const dur = tradeDurationRef.current;
-    const durUnit = tradeDurationUnitRef.current;
-    if (!acctId || !getAccessToken()) {
-      setExecError("Connect your Deriv account to execute trades.");
-      return;
-    }
+    const dur = 2; const durUnit = "m"; // HARDCODED
+    
+    if (!acctId || !getAccessToken()) { setExecError("Connect your Deriv account to execute trades."); return; }
     setExecError("");
     try {
       const contractType = direction === "RISE" ? "CALL" : "PUT";
@@ -610,7 +505,6 @@ export function V75Analyzer() {
     }
   }, []);
 
-  // ── Tick handler ──
   const handleTick = useCallback((tickPrice: number, epoch: number) => {
     setPrice(tickPrice); setLastTickMs(Date.now()); priceRef.current = tickPrice;
     const sig = engine.processTick(tickPrice, epoch * 1000, atrRef.current);
@@ -619,42 +513,43 @@ export function V75Analyzer() {
     setSignals(prev => [sig, ...prev].slice(0, 50));
     saveSignal(sig);
 
-    if (executionModeRef.current === "AUTO") {
-      fireTrade(sig);
-    } else {
-      setPendingManualSignal(sig);
-    }
+    if (executionModeRef.current === "AUTO") fireTrade(sig);
+    else setPendingManualSignal(sig);
 
     const entryPrice = sig.entryPrice;
     setTimeout(() => {
       setSignals(cur => cur.map(s => {
         if (s.id !== sig.id) return s;
-        const won = (s.direction === "RISE" && tickPrice >= entryPrice) ||
-                    (s.direction === "FALL" && tickPrice <= entryPrice);
+        const won = (s.direction === "RISE" && tickPrice >= entryPrice) || (s.direction === "FALL" && tickPrice <= entryPrice);
         const outcome: "WIN" | "LOSS" = won ? "WIN" : "LOSS";
         updateSignalOutcome(s.id, outcome, tickPrice);
         return { ...s, outcome, exitPrice: tickPrice };
       }));
-    }, 120_000);
+    }, 120_000); // 2-min resolve
   }, [fireTrade]);
 
   const handleM1 = useCallback((candles: Candle[]) => {
     if (candles.length >= 14) atrRef.current = computeATR(candles, 14);
   }, []);
 
-  // ── Deriv public tick client ──
   useEffect(() => {
     const client = new DerivClient({ onTick: handleTick, onM1: handleM1, onM5: () => {}, onM15: () => {}, onState: setConn });
     client.start();
     return () => client.stop();
   }, [handleTick, handleM1]);
 
-  const { zScore, hurstExponent, tickVelocity, dti, ready } = metrics;
-  const gateHurst = hurstExponent >= 0.55;
-  const gateZ = Math.abs(zScore) >= 1.5 && Math.abs(zScore) <= 2.5;
+  // Derived Gate Logic
+  const ema = (metrics as any).ema ?? price; // Fallback syncs perfectly with your engine
+  const zScore = metrics.zScore ?? 0;
+  const tickVelocity = metrics.tickVelocity ?? 0;
+  const dti = metrics.dti ?? 0;
+  const ready = metrics.ready ?? false;
+
+  const gateTrend = zScore > 0 ? price > ema : zScore < 0 ? price < ema : false;
+  const gateZ = Math.abs(zScore) >= 1.0 && Math.abs(zScore) <= 2.2;
   const gateV = tickVelocity >= 1.2;
   const gateDTI = zScore > 0 ? dti >= 0.70 : zScore < 0 ? dti <= -0.70 : false;
-  const allGates = gateHurst && gateZ && gateV && gateDTI;
+  const allGates = gateTrend && gateZ && gateV && gateDTI;
 
   const activeSignal = signals[0]?.outcome === "PENDING" && Date.now() - signals[0].timestamp < 120_000 ? signals[0] : null;
   const tickAgo = ((Date.now() - lastTickMs) / 1000).toFixed(1);
@@ -666,7 +561,6 @@ export function V75Analyzer() {
 
   return (
     <div className="min-h-screen bg-[#090912] text-white font-sans">
-      {/* ── Top bar ── */}
       <div className="border-b border-zinc-800/80 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-1.5 h-8 rounded-full bg-violet-500" />
@@ -687,7 +581,6 @@ export function V75Analyzer() {
       </div>
 
       <div className="p-5 flex gap-5">
-        {/* ── Main content ── */}
         <div className="flex-1 min-w-0 space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2">
@@ -695,8 +588,8 @@ export function V75Analyzer() {
             </div>
             <div className="space-y-2">
               <div className="text-xs uppercase tracking-widest text-zinc-500 px-1">Gates Check</div>
-              <GateRow label="Gate 1 — Regime" sub="Hurst ≥ 0.55 (Trending)" met={gateHurst} value={`H=${hurstExponent.toFixed(3)}`} />
-              <GateRow label="Gate 2 — Goldilocks" sub="1.5 ≤ |Z| ≤ 2.5" met={gateZ} value={`Z=${zScore >= 0 ? "+" : ""}${zScore.toFixed(2)}`} />
+              <GateRow label="Gate 1 — The River" sub="Macro Trend Alignment" met={gateTrend} value={price > ema ? "FLOW UP" : "FLOW DOWN"} />
+              <GateRow label="Gate 2 — Goldilocks" sub="1.0 ≤ |Z| ≤ 2.2" met={gateZ} value={`Z=${zScore >= 0 ? "+" : ""}${zScore.toFixed(2)}`} />
               <GateRow label="Gate 3 — Fuel" sub="Tick Velocity ≥ 1.2×" met={gateV} value={`${tickVelocity.toFixed(2)}×`} />
               <GateRow label="Gate 4 — DTI Pressure" sub={zScore > 0 ? "Need DTI ≥ +0.70" : zScore < 0 ? "Need DTI ≤ −0.70" : "Need directional Z first"} met={gateDTI} value={`DTI=${dti >= 0 ? "+" : ""}${dti.toFixed(2)}`} />
               <div className={`text-center text-xs font-semibold tracking-widest py-2 rounded border ${allGates ? "text-emerald-300 bg-emerald-500/10 border-emerald-500/20" : "text-zinc-500 bg-zinc-800/40 border-zinc-700/30"}`}>
@@ -706,7 +599,7 @@ export function V75Analyzer() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5"><HurstDisplay h={hurstExponent} /></div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5"><EMADisplay price={price} ema={ema} /></div>
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 md:col-span-1 xl:col-span-2"><ZGoldilocks z={zScore} /></div>
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5"><VelocityDisplay v={tickVelocity} /></div>
           </div>
@@ -747,23 +640,16 @@ export function V75Analyzer() {
           </div>
         </div>
 
-        {/* ── Auth + Execution Sidebar ── */}
         <div className="w-72 shrink-0">
           <AuthPanel
             authStatus={authStatus} authError={authError}
-            accounts={accounts} selectedAccountId={selectedAccountId} setSelectedAccountId={id => { setSelectedAccountId(id); selectedAccountRef.current = id; }}
+            accounts={accounts} selectedAccountId={selectedAccountId} setSelectedAccountId={(id: string) => { setSelectedAccountId(id); selectedAccountRef.current = id; }}
             executionMode={executionMode} setExecutionMode={setExecutionMode}
             stakeAmount={stakeAmount} setStakeAmount={setStakeAmount}
-            tpLimit={tpLimit} setTpLimit={setTpLimit}
-            slLimit={slLimit} setSlLimit={setSlLimit}
-            tradeDuration={tradeDuration} setTradeDuration={setTradeDuration}
-            tradeDurationUnit={tradeDurationUnit} setTradeDurationUnit={setTradeDurationUnit}
+            tpLimit={tpLimit} setTpLimit={setTpLimit} slLimit={slLimit} setSlLimit={setSlLimit}
             pendingManualSignal={pendingManualSignal} manualCountdown={manualCountdown}
-            onManualExecute={handleManualExecute}
-            onManualRise={() => fireDirectionTrade("RISE")}
-            onManualFall={() => fireDirectionTrade("FALL")}
-            onLogin={initiateLogin}
-            onLogout={() => { clearAccessToken(); setAuthStatus("not-connected"); setAccounts([]); setSelectedAccountId(""); setAuthError(""); }}
+            onManualExecute={handleManualExecute} onManualRise={() => fireDirectionTrade("RISE")} onManualFall={() => fireDirectionTrade("FALL")}
+            onLogin={initiateLogin} onLogout={() => { clearAccessToken(); setAuthStatus("not-connected"); setAccounts([]); setSelectedAccountId(""); setAuthError(""); }}
             allGates={allGates} execError={execError}
           />
         </div>
