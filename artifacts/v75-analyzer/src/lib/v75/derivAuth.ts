@@ -1,5 +1,5 @@
-const APP_ID = "33uv55TEjd5QTVOuTAOZ5";
-const REDIRECT_URI = "https://replitproject--juzijana70.replit.app/";
+const APP_ID = "33uTkAzdOo9TdI46YlHdQ";
+const REDIRECT_URI = "https://volatility-75--lisalobo89.replit.app/";
 const AUTH_ENDPOINT = "https://auth.deriv.com/oauth2/auth";
 
 // Same host that DerivClient uses for tick data — confirmed to work in-browser

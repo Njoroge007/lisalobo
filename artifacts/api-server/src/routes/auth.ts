@@ -2,8 +2,8 @@ import { Router } from "express";
 
 const router = Router();
 
-const APP_ID = "33uv55TEjd5QTVOuTAOZ5";
-const REDIRECT_URI = "https://replitproject--juzijana70.replit.app/";
+const APP_ID = "33uTkAzdOo9TdI46YlHdQ";
+const REDIRECT_URI = "https://volatility-75--lisalobo89.replit.app/";
 const TOKEN_ENDPOINT = "https://auth.deriv.com/oauth2/token";
 const DERIV_REST_BASE = "https://api.derivws.com";
 
