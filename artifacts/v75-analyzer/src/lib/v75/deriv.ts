@@ -7,10 +7,10 @@ export interface DerivCallbacks {
   onM1: (candles: Candle[]) => void;
   onM5: (candles: Candle[]) => void;
   onM15: (candles: Candle[]) => void;
+  onH1: (candles: Candle[]) => void;
+  onH4: (candles: Candle[]) => void;
   onState: (s: ConnState) => void;
 }
-
-const PUBLIC_FEED = "wss://api.derivws.com/trading/v1/options/ws/public";
 
 export class DerivClient {
   private ws?: WebSocket;
@@ -20,6 +20,8 @@ export class DerivClient {
   private m1: Candle[] = [];
   private m5: Candle[] = [];
   private m15: Candle[] = [];
+  private h1: Candle[] = [];
+  private h4: Candle[] = [];
 
   constructor(cbs: DerivCallbacks) {
     this.cbs = cbs;
@@ -29,33 +31,25 @@ export class DerivClient {
     this.closed = false;
     this.connect();
   }
-
   stop() {
     this.closed = true;
     this.ws?.close();
   }
 
-  private send(o: unknown) {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(o));
-    }
-  }
-
   private connect() {
     this.cbs.onState("connecting");
-    this.ws = new WebSocket(PUBLIC_FEED);
-
+    this.ws = new WebSocket("wss://ws.derivws.com/websockets/v3?app_id=1089");
     this.ws.onopen = () => {
       this.cbs.onState("open");
       this.reconnectMs = 1000;
       this.send({ ticks: "R_75", subscribe: 1, req_id: 1 });
       this.send({ ticks_history: "R_75", adjust_start_time: 1, count: 1000, end: "latest", granularity: 60, start: 1, style: "candles", subscribe: 1, req_id: 2 });
       this.send({ ticks_history: "R_75", adjust_start_time: 1, count: 500, end: "latest", granularity: 300, start: 1, style: "candles", subscribe: 1, req_id: 3 });
+      this.send({ ticks_history: "R_75", adjust_start_time: 1, count: 200, end: "latest", granularity: 3600, start: 1, style: "candles", req_id: 4 });
+      this.send({ ticks_history: "R_75", adjust_start_time: 1, count: 100, end: "latest", granularity: 14400, start: 1, style: "candles", req_id: 5 });
       this.send({ ticks_history: "R_75", adjust_start_time: 1, count: 200, end: "latest", granularity: 900, start: 1, style: "candles", subscribe: 1, req_id: 6 });
     };
-
     this.ws.onmessage = (ev) => this.handle(JSON.parse(ev.data));
-
     this.ws.onclose = () => {
       this.cbs.onState("closed");
       if (!this.closed) {
@@ -63,8 +57,11 @@ export class DerivClient {
         this.reconnectMs = Math.min(this.reconnectMs * 2, 8000);
       }
     };
-
     this.ws.onerror = () => this.ws?.close();
+  }
+
+  private send(o: unknown) {
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(o));
   }
 
   private handle(d: any) {
@@ -72,17 +69,17 @@ export class DerivClient {
       this.cbs.onTick(d.tick.quote, d.tick.epoch);
       return;
     }
-
     if (d.msg_type === "candles" && d.candles) {
       const cs: Candle[] = d.candles.map((c: any) => ({
         time: c.epoch, open: +c.open, high: +c.high, low: +c.low, close: +c.close,
       }));
       if (d.req_id === 2) { this.m1 = cs; this.cbs.onM1(cs); }
       else if (d.req_id === 3) { this.m5 = cs; this.cbs.onM5(cs); }
+      else if (d.req_id === 4) { this.h1 = cs; this.cbs.onH1(cs); }
+      else if (d.req_id === 5) { this.h4 = cs; this.cbs.onH4(cs); }
       else if (d.req_id === 6) { this.m15 = cs; this.cbs.onM15(cs); }
       return;
     }
-
     if (d.msg_type === "ohlc" && d.ohlc) {
       const c: Candle = {
         time: d.ohlc.open_time, open: +d.ohlc.open, high: +d.ohlc.high,
