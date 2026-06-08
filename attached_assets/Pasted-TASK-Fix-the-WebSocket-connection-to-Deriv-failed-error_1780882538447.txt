@@ -1,0 +1,182 @@
+TASK: Fix the "WebSocket connection to Deriv failed" error on the RISE and FALL manual trade buttons. Do not touch anything else — the auth flow, signal engine, gate logic, and UI layout must remain exactly as they are.
+
+ROOT CAUSE TO DIAGNOSE FIRST
+Before changing any code, search the entire codebase for any of these patterns and delete or replace every instance:
+
+wss://ws.derivws.com/websockets/v3 — this is the legacy WebSocket endpoint. It does NOT work with OAuth tokens.
+wss://ws.binaryws.com/websockets/v3 — also legacy, also broken.
+Any WebSocket construction that sends an authorize message (e.g. { "authorize": token }) after connecting — this is the old auth pattern. The new API does not use it.
+Any new WebSocket(...) that uses a hardcoded wss:// URL instead of the OTP-generated URL.
+
+These legacy patterns are almost certainly why the connection is failing. The new Deriv API requires a fresh OTP-generated WebSocket URL for every trade session.
+
+THE CORRECT TRADE EXECUTION FLOW (implement exactly as written)
+Every time the user clicks RISE or FALL (manual), or a signal fires in AUTO mode, run this sequence:
+
+STEP 1 — Get the OTP WebSocket URL from your backend
+Your backend must proxy this request (never call it from the browser directly — CORS will block it):
+POST https://api.derivws.com/trading/v1/options/accounts/{accountId}/otp
+Headers:
+  Authorization: Bearer {access_token}     ← the JWT token stored in memory after OAuth login
+  Deriv-App-ID: 33ueDwEu9upIvEkFRHZQf
+Create/update your backend endpoint POST /api/deriv/ws-token to make this call and return the result:
+jsapp.post('/api/deriv/ws-token', async (req, res) => {
+  const { accountId, accessToken } = req.body;
+
+  try {
+    const otpRes = await fetch(
+      `https://api.derivws.com/trading/v1/options/accounts/${accountId}/otp`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Deriv-App-ID': '33ueDwEu9upIvEkFRHZQf'
+        }
+      }
+    );
+
+    if (!otpRes.ok) {
+      const err = await otpRes.json();
+      return res.status(otpRes.status).json({ error: err });
+    }
+
+    const data = await otpRes.json();
+    // data.data.url === "wss://api.derivws.com/trading/v1/options/ws/demo?otp=abc123"
+    res.json({ wsUrl: data.data.url });
+
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+STEP 2 — Open the authenticated WebSocket using the OTP URL
+On the frontend, after receiving wsUrl from /api/deriv/ws-token:
+jsasync function executeDerivTrade(contractType, stakeAmount, accountId, accessToken) {
+  // Step 1: Get fresh OTP WebSocket URL
+  let wsUrl;
+  try {
+    const otpResponse = await fetch('/api/deriv/ws-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountId, accessToken })
+    });
+
+    if (!otpResponse.ok) {
+      const err = await otpResponse.json();
+      showTradeError('Failed to get trade session: ' + (err.error?.message || 'Unknown error'));
+      return;
+    }
+
+    const { wsUrl: url } = await otpResponse.json();
+    wsUrl = url;
+  } catch (e) {
+    showTradeError('Network error getting trade session.');
+    return;
+  }
+
+  // Step 2: Open the authenticated WebSocket — NO authorize message needed
+  const ws = new WebSocket(wsUrl);
+  let proposalId = null;
+
+  ws.onopen = () => {
+    // Step 3: Send proposal request immediately on open
+    ws.send(JSON.stringify({
+      proposal: 1,
+      amount: stakeAmount,
+      basis: 'stake',
+      contract_type: contractType,   // "CALL" or "PUT"
+      currency: 'USD',
+      duration: 2,
+      duration_unit: 'm',
+      symbol: 'R_75',
+      req_id: 1
+    }));
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+
+    // Handle errors from Deriv
+    if (msg.error) {
+      showTradeError('Deriv error: ' + msg.error.message);
+      ws.close();
+      return;
+    }
+
+    // Step 4: Proposal received — extract ID and buy immediately
+    if (msg.msg_type === 'proposal') {
+      proposalId = msg.proposal.id;
+      ws.send(JSON.stringify({
+        buy: proposalId,
+        price: stakeAmount,
+        req_id: 2
+      }));
+    }
+
+    // Step 5: Buy confirmed — record result and close
+    if (msg.msg_type === 'buy') {
+      const result = {
+        contractId: msg.buy.contract_id,
+        executionPrice: msg.buy.buy_price,
+        longcode: msg.buy.longcode,
+        entrySpot: msg.buy.start_time
+      };
+
+      // Log result to your signal history / DB
+      recordTradeExecution(result);
+
+      // Show confirmation in UI
+      showTradeSuccess(`Trade placed: ${contractType} @ $${result.executionPrice}`);
+
+      // Close this WebSocket — it was single-use for this trade
+      ws.close();
+    }
+  };
+
+  ws.onerror = (err) => {
+    showTradeError('WebSocket connection to Deriv failed. Retrying...');
+    ws.close();
+  };
+
+  ws.onclose = () => {
+    // Connection closed normally — no action needed
+  };
+}
+
+STEP 3 — Wire RISE and FALL buttons to this function
+Find the RISE button handler and replace its content with:
+jsexecuteDerivTrade('CALL', stakeAmount, selectedAccountId, accessToken);
+Find the FALL button handler and replace its content with:
+jsexecuteDerivTrade('PUT', stakeAmount, selectedAccountId, accessToken);
+Where:
+
+stakeAmount = the value from the STAKE ($) input field (parse as float)
+selectedAccountId = the account ID selected in the AUTH STATUS dropdown (e.g. VRTC90004580 for demo)
+accessToken = the in-memory JWT token obtained during OAuth login
+
+
+STEP 4 — Guard against unauthenticated clicks
+At the top of executeDerivTrade, add this guard:
+jsif (!accessToken || !selectedAccountId) {
+  showTradeError('Connect your Deriv account before trading.');
+  return;
+}
+
+STEP 5 — Error display
+Implement showTradeError(message) to display the error visibly below the RISE/FALL buttons (the area currently showing "WebSocket connection to Deriv failed"). Clear it on the next trade attempt.
+Implement showTradeSuccess(message) to display a green confirmation in the same area.
+
+CRITICAL RULES — DO NOT BREAK
+
+Never use wss://ws.derivws.com or wss://ws.binaryws.com — those are legacy and dead for OAuth auth.
+Never send { "authorize": token } over the WebSocket — the OTP URL IS the authentication. The connection is already authenticated when it opens.
+Request a fresh OTP for every single trade — OTPs are single-use and short-lived. Never cache or reuse wsUrl.
+The OTP fetch must go through your backend — the Authorization header cannot be set from the browser to api.derivws.com due to CORS.
+Do not touch the public tick WebSocket — the R_75 price feed on wss://api.derivws.com/trading/v1/options/ws/public is separate and must keep running uninterrupted.
+Do not touch the signal engine, gates, state machine, or Hurst/Z-score/DTI/Velocity logic.
+Do not touch the OAuth login/logout flow — it is working correctly.
+The duration is 2 and duration_unit is "m" (2 minutes) — do not change this.
+Symbol is "R_75" — do not change this.
+
+
+That is the complete fix. The entire problem is that the old code is trying to connect to a legacy WebSocket endpoint and/or authenticate with an authorize message. Replace that pattern with the OTP flow above and the RISE/FALL buttons will work.

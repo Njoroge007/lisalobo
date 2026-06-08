@@ -1,0 +1,4 @@
+ALTER TABLE public.v75_segment_records 
+  ADD COLUMN IF NOT EXISTS dominant_pattern TEXT DEFAULT 'NONE',
+  ADD COLUMN IF NOT EXISTS pattern_score INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS pattern_direction TEXT DEFAULT 'NEUTRAL';

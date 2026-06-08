@@ -1,0 +1,42 @@
+Role: Lead Quantitative TypeScript Architect
+
+Task: Finalize the "V75 Momentum Breakout Engine". We are shifting from mean-reversion to momentum-following. All gates must now be symmetrical for RISE and FALL trends.
+
+Execute the final architecture:
+
+### PHASE 1: Mathematics Library Update (indicators.ts)
+1. Add `computeTickImbalance(prices, period=15)`:
+   - Logic: Iterate last 15 ticks. Up-tick = +1, Down-tick = -1, Flat = 0.
+   - Return (Sum / (period - 1)). Result range: [-1.0, 1.0].
+2. Ensure `computeZScoreComponents` and `computeHurst` remain the foundation.
+
+### PHASE 2: The Momentum Engine (momentumEngine.ts)
+Create/Overwrite `lib/v75/momentumEngine.ts` with this strict logic:
+1. State Machine: IDLE -> IN_TRADE (120s) -> RESETTING (5s) -> IDLE.
+2. Trigger Logic (on each live tick):
+   - IF State !== IDLE, return.
+   - Gate 1 (Regime): Hurst >= 0.55 (Trending).
+   - Gate 2 (Goldilocks Zone): Math.abs(zScore) >= 1.5 AND Math.abs(zScore) <= 2.5.
+   - Gate 3 (Fuel): Tick Velocity >= 1.2x.
+   - Gate 4 (Smoothness/DTI): 
+     - IF zScore > 0, DTI must be >= +0.70.
+     - IF zScore < 0, DTI must be <= -0.70.
+3. Firing: 
+   - IF all gates pass: 
+     - direction = (zScore > 0 ? "CALL" : "PUT")
+     - Trigger Trade.
+     - Transition to IN_TRADE.
+
+### PHASE 3: Dashboard Architecture (V75Analyzer.tsx)
+1. Remove all references to Snapback logic.
+2. UI Layout:
+   - "Engine State": Pulsing indicator.
+   - "Metrics Panel": Hurst (readout), Z-Score (with 1.5-2.5 Goldilocks visualization), Velocity (bar), DTI (gauge -1.0 to 1.0).
+   - "Gates Check": 4 rows showing real-time PASS/FAIL status.
+3. Visualization:
+   - Implement a Z-Score background track that visually highlights the 1.5 to 2.5 "Goldilocks" safe-zone.
+
+### PHASE 4: WebSocket & Resolution
+1. Link WebSocket tick stream exclusively to `momentumEngine.processTick()`.
+2. Ensure signal firing triggers the Deriv API payload directly.
+3. Use a persistent timestamp check for 120,000ms duration, logging outcome to history list.

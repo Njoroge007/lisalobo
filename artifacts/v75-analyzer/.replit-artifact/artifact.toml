@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "V75 Analyzer"
+version = "1.0.0"
+id = "artifacts/v75-analyzer"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22867
+
+[services.development]
+run = "pnpm --filter @workspace/v75-analyzer run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/v75-analyzer", "run", "build" ]
+publicDir = "artifacts/v75-analyzer/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22867"
+BASE_PATH = "/"

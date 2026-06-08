@@ -1,0 +1,35 @@
+Please execute a complete codebase cleanup and refactor based on the full audit. Implement the following changes systematically across the project:
+
+1. Code Purge (indicators.ts & candlePatterns.ts):
+   - Completely delete the unused 'detectSharpRSIDivergence' function from indicators.ts.
+   - Completely delete the unused 'dominantFromScan' function from candlePatterns.ts.
+
+2. UI Alignment (V75Analyzer.tsx):
+   - Locate line 995 where the UI reads 'microTrend.layers.cci'. Rename this label from "CCI" to "PULL".
+   - Update its data binding to target the '.pullback' field instead of '.cci' so the new Bulls/Bears Power layer renders properly.
+
+3. Streamline Streams & Guards (deriv.ts & V75Analyzer.tsx):
+   - Remove the H1 (granularity 3600) and H4 (granularity 14400) WebSocket subscriptions entirely.
+   - Refactor the analysis useMemo hook (around line 204) to completely remove the H1 and H4 data readiness guards. The engine must initialize and calculate instantly using only M1, M5, and M15 data.
+   - Clean up stale references to 'h4Bias' and 'h1Bias'.
+
+4. Clean Learning Metrics (patternMatch.ts):
+   - Remove the vestigial "BOB_H4", "BEOB_H4", "BOB_H1", and "BEOB_H1" rows from the conditionAccuracy lists on lines 70–71.
+
+5. Replace MT5 Copy Panel with Deriv 2-Min Ticket Formatter:
+   - Completely remove the MT5CopyPanel.tsx component and its 15/30/60min buttons.
+   - Create a brand new "Deriv Option Ticket" module. This panel must format and display the exact JSON contract payload required for a Deriv API binary contract entry.
+   - The ticket object must strictly enforce:
+     {
+       "proposal": 1,
+       "amount": <User_Stake>,
+       "basis": "stake",
+       "currency": "USD",
+       "duration": 2,
+       "duration_unit": "m",
+       "symbol": "R_75",
+       "contract_type": "CALL" (for Rise signals) or "PUT" (for Fall signals)
+     }
+   - Add a sleek "Copy Payload" button and a visual indicator showing that the contract parameters are optimized strictly for a 2-minute options window.
+
+Verify that all changes compile without TypeScript warnings and that startup execution speed is fully optimized.

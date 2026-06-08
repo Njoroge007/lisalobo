@@ -1,0 +1,49 @@
+Role: You are an elite quantitative developer and expert TypeScript engineer specializing in algorithmic trading for synthetic indices.
+
+Task: Refactor my existing "V75 Analyzer" tool. The current architecture was built for standard margin/CFD trading, but we are pivoting the logic exclusively for 2-minute fixed-duration Rise/Fall options contracts on Deriv's Volatility 75 index.
+
+We must gut the macro-analysis paralysis, remove standard Stop Loss/Take Profit logic, and transition the core engine to catch micro-rejections and immediate algorithmic recoils.
+
+Please refactor the specific files and modules based on the following strict architectural upgrades:
+
+1. Re-engineer Risk Management & Timeframes
+Target Files: scoring.ts, riskManagement.ts (or equivalent)
+
+Remove SL/TP: Erase all logic calculating dynamic Stop Losses (SL) and Take Profits (TP). A 2-minute options contract has an absolute expiry, so risk/reward ratios are invalid for entry validation.
+
+Timeframe Optimization: Remove H4 and H1 entirely from the scoring.ts confluence layer. Redefine macro alignment strictly as the M15 (Macro Direction) and M5 (Structural Context). The entry trigger will operate on the M1 chart.
+
+Volatility Threshold Filter: Replace the SL/TP logic with an ATR-based execution gate. Prevent the tool from firing if the M1 14-period ATR is excessively high (unpredictable spikes) or extremely low (dead market, high risk of tying). Set acceptable upper and lower ATR bounds.
+
+2. Overhaul Signal #1: The Micro Trend (Impulse Catching)
+Target File: lib/v75/microTrend.ts, lib/v75/indicators.ts
+
+Remove the Exhaustion Trap: Delete the hard gate requiring "3+ consecutive candles moving in signal direction." This causes late entries at the peak of momentum.
+
+Implement Pullback-Rejection Logic: The new goal is to identify micro-dips within an upward trend to catch the next 2-minute impulse.
+
+Indicator Addition: Add Bulls Power and Bears Power calculations to indicators.ts.
+
+New Entry Rules (Example for a RISE signal):
+
+M15 and M5 EMAs (9, 21, 50) must be aligned bullish.
+
+On the M1 chart, wait for a localized dip against the trend.
+
+Trigger the RISE signal when Bears Power spikes below zero (confirming the dip) while Bulls Power remains resilient, combined with an M1 price rejection (wick touch) off the M5 21 EMA. This targets the exact start of the new 2-minute upward impulse. Reverse this exact logic for FALL signals.
+
+3. Refactor Signal #2: Smart Money Concepts (Immediate Recoil)
+Target File: lib/v75/smc.ts, lib/v75/microReversal.ts
+
+Shift from Structure to Instant Recoil: Do not wait for M1 candles to close inside Fair Value Gaps (FVGs) or Order Blocks (OBs) to confirm a Change of Character (CHoCH). This introduces too much latency.
+
+New Entry Rules: Identify FVGs and OBs on the M5 chart. The tool must fire the execution signal the exact moment the M1 price action pierces an M5 FVG/OB zone, provided the M1 RSI (14) is simultaneously printing sharp divergence. We are capitalizing on the immediate algorithmic recoil off these zones for a 2-minute duration.
+
+4. Implementation Priorities & Output
+Please rewrite the TypeScript logic for microTrend.ts first, implementing the Bulls/Bears Power pullback strategy.
+
+Next, refactor scoring.ts to remove the conflicting H4/H1 timeframes and update the confluence weighting to favor the M5/M1 alignment.
+
+Ensure all mathematical functions in indicators.ts are optimized for low-latency execution so the M1 ticks are processed instantly.
+
+Do not provide generic advice. Output the direct, modular code updates required to transform these specific files.

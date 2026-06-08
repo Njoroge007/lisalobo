@@ -1,0 +1,1 @@
+- [Lovable TanStack Start migration](lovable-tanstack-migration.md) — Lovable apps using TanStack Start need server files deleted; replace Supabase with fetch to /api routes.

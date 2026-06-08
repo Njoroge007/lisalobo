@@ -1,0 +1,1 @@
+ALTER TABLE public.v75_segment_records ADD COLUMN IF NOT EXISTS m15_bias TEXT DEFAULT 'NEUTRAL';

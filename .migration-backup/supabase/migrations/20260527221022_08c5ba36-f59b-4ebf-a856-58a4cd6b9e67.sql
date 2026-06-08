@@ -1,0 +1,1 @@
+ALTER TABLE public.v75_condition_stats ADD COLUMN IF NOT EXISTS weight_multiplier numeric NOT NULL DEFAULT 1.0;

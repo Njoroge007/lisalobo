@@ -1,0 +1,206 @@
+TASK: Replace all existing Deriv authentication and trade execution code with the following complete integration. Do not preserve any legacy authorize, token, or old WebSocket auth patterns. Follow every instruction precisely.
+
+CONTEXT
+This is the Momentum Breakout Command Center — a trading signal tool for Deriv's Volatility 75 Index (R_75). The tool already has a working signal engine (Hurst, Z-Score, Tick Velocity, DTI gates). Your job is ONLY to wire up authentication and trade execution correctly using Deriv's current OAuth 2.0 + PKCE API. Do not touch the signal engine logic.
+Credentials (hardcoded — do not prompt the user for these):
+
+App ID (client_id): 33ueDwEu9upIvEkFRHZQf
+Redirect URI: https://replit-exportzip-1--mainanjoroge749.replit.app/
+Deriv OAuth Authorization Endpoint: https://auth.deriv.com/oauth2/auth
+Deriv Token Exchange Endpoint: https://auth.deriv.com/oauth2/token
+Deriv REST API Base URL: https://api.derivws.com
+WebSocket public feed (no auth, for ticks): wss://api.derivws.com/trading/v1/options/ws/public
+
+
+PART 1 — OAUTH 2.0 + PKCE LOGIN BUTTON
+When the user clicks "Login with Deriv":
+
+Generate PKCE in the browser (client-side only):
+
+jsconst array = crypto.getRandomValues(new Uint8Array(64));
+const codeVerifier = Array.from(array)
+  .map(v => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~'[v % 66])
+  .join('');
+
+const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier));
+const codeChallenge = btoa(String.fromCharCode(...new Uint8Array(hash)))
+  .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+const state = crypto.getRandomValues(new Uint8Array(16))
+  .reduce((s, b) => s + b.toString(16).padStart(2, '0'), '');
+
+sessionStorage.setItem('pkce_code_verifier', codeVerifier);
+sessionStorage.setItem('oauth_state', state);
+
+Build the authorization URL and redirect the browser (do NOT open a new tab or popup — redirect the current window):
+
+https://auth.deriv.com/oauth2/auth?
+  response_type=code
+  &client_id=33ueDwEu9upIvEkFRHZQf
+  &redirect_uri=https://replit-exportzip-1--mainanjoroge749.replit.app/
+  &scope=trade+account_manage
+  &state={RANDOM_STATE}
+  &code_challenge={PKCE_CHALLENGE}
+  &code_challenge_method=S256
+
+Deriv handles all login UI — do not build any login form. The user logs in on Deriv's own page and is sent back to the redirect URI.
+
+
+PART 2 — CALLBACK HANDLER (runs on page load)
+On every page load, check the URL for ?code= and ?state= query parameters:
+
+If code is present in the URL:
+
+Read state from URL, compare with sessionStorage.getItem('oauth_state'). If they do not match → show error "Authentication failed: state mismatch" and stop.
+Read code from URL.
+Read codeVerifier from sessionStorage.getItem('pkce_code_verifier').
+Immediately clean the URL (use history.replaceState({}, '', '/')) so the code does not stay visible.
+Call your backend /api/auth/token (see Part 3) with { code, codeVerifier }.
+On success: receive { access_token, expires_in }, store in memory (JavaScript variable, NOT localStorage or sessionStorage after this point).
+Clear pkce_code_verifier and oauth_state from sessionStorage.
+Call /api/deriv/accounts (see Part 4) to load accounts.
+Update the AUTH STATUS panel: show green "Connected" badge, show account login ID and balance, hide the "Login with Deriv" button, show "Logout" button.
+
+
+If error is present in the URL (e.g. user cancelled):
+
+Show error message in AUTH STATUS panel: "Login cancelled or failed."
+Clean the URL.
+
+
+If neither code nor error is in the URL → normal app load, check if access token is already in memory (it won't be after reload since it's in-memory only, so show the login button).
+
+
+PART 3 — BACKEND TOKEN EXCHANGE ENDPOINT
+Create a server-side endpoint (Node.js/Express or equivalent): POST /api/auth/token
+This MUST run server-side. Never exchange the code in the browser.
+jsapp.post('/api/auth/token', async (req, res) => {
+  const { code, codeVerifier } = req.body;
+
+  const params = new URLSearchParams({
+    grant_type: 'authorization_code',
+    client_id: '33ueDwEu9upIvEkFRHZQf',
+    code: code,
+    code_verifier: codeVerifier,
+    redirect_uri: 'https://replit-exportzip-1--mainanjoroge749.replit.app/'
+  });
+
+  const response = await fetch('https://auth.deriv.com/oauth2/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString()
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    return res.status(400).json({ error: data.error_description || 'Token exchange failed' });
+  }
+
+  res.json({ access_token: data.access_token, expires_in: data.expires_in });
+});
+
+PART 4 — ACCOUNT FETCH + DISPLAY
+After token is obtained, call your backend endpoint GET /api/deriv/accounts which proxies:
+GET https://api.derivws.com/trading/v1/options/accounts
+Headers:
+  Authorization: Bearer {access_token}
+  Deriv-App-ID: 33ueDwEu9upIvEkFRHZQf
+Parse the response — it returns an array of accounts (real and demo). Display them in the AUTH STATUS section as a dropdown or list so the user can select which account to trade with. Store the selected accountId for use in trade execution.
+
+PART 5 — AUTHENTICATED WEBSOCKET FOR TRADING
+When a trade signal fires and needs to execute:
+Step A — Get a WebSocket OTP URL:
+Call your backend POST /api/deriv/ws-token which proxies:
+POST https://api.derivws.com/trading/v1/options/accounts/{accountId}/otp
+Headers:
+  Authorization: Bearer {access_token}
+  Deriv-App-ID: 33ueDwEu9upIvEkFRHZQf
+The response returns data.url — a wss:// URL that already contains a short-lived OTP as a query parameter.
+Step B — Open the authenticated WebSocket:
+jsconst ws = new WebSocket(data.url); // OTP is embedded in the URL, no extra headers needed
+Step C — Send proposal then buy:
+Once ws.onopen fires:
+
+Send a proposal request:
+
+json{
+  "proposal": 1,
+  "amount": {STAKE_AMOUNT},
+  "basis": "stake",
+  "contract_type": "CALL" or "PUT",
+  "currency": "USD",
+  "duration": 2,
+  "duration_unit": "m",
+  "symbol": "R_75"
+}
+
+When the proposal response arrives (check msg_type === "proposal"), extract proposal.id and send:
+
+json{
+  "buy": "{proposal_id}",
+  "price": {STAKE_AMOUNT}
+}
+
+When the buy response arrives (check msg_type === "buy"), extract:
+
+buy.contract_id
+buy.buy_price (actual execution price)
+buy.longcode (description)
+
+
+Store these in the signal history row alongside entry price and slippage (execution price minus signal price).
+Close the WebSocket after the buy confirmation is received.
+
+
+PART 6 — TICK FEED (unchanged, use public WebSocket)
+For the R_75 live tick feed (price display and signal engine), continue using the public WebSocket with no auth:
+wss://api.derivws.com/trading/v1/options/ws/public
+Subscribe to ticks on R_75 exactly as the engine already does. This is separate from the authenticated trading WebSocket and must remain always-on during the session.
+
+PART 7 — LOGOUT
+"Logout" button:
+
+Clears the in-memory access token variable.
+Shows the "Login with Deriv" button again.
+Updates AUTH STATUS panel to show "Not connected."
+Does NOT redirect to Deriv — logout is local only.
+
+
+PART 8 — AUTH STATUS PANEL STATES
+The right-side AUTH STATUS panel must show exactly three states:
+State 1 — Not connected:
+
+Red/grey badge: "Not Connected"
+Show "Login with Deriv" button (the existing styled button)
+Text: "Login to enable live trade execution via Deriv API."
+
+State 2 — Connecting (during callback):
+
+Amber badge: "Connecting..."
+Show spinner
+
+State 3 — Connected:
+
+Green badge: "Connected"
+Show: Account ID, Account Type (real/demo), Balance (currency + amount)
+Account selector dropdown if multiple accounts
+Show "Logout" button
+Hide "Login with Deriv" button
+
+
+PART 9 — EXECUTION MODE WIRING
+MANUAL mode: When signal fires, highlight the Execute button for 10 seconds. If user clicks it within 10 seconds → run Parts 5A through 5C. If not clicked within 10 seconds → button goes dim, signal missed.
+AUTO mode: When signal fires → immediately run Parts 5A through 5C without any user interaction.
+In both modes: if user is NOT authenticated (no access token in memory) → do not attempt execution, instead flash a warning in AUTH STATUS: "Connect your Deriv account to execute trades."
+
+CRITICAL RULES — DO NOT BREAK THESE
+
+Never use legacy authorize WebSocket message — that is the old API. The new API uses OAuth 2.0 Bearer tokens + OTP WebSocket URLs only.
+Token exchange must happen server-side — never POST to https://auth.deriv.com/oauth2/token from the browser directly.
+The redirect must go back to exactly https://replit-exportzip-1--mainanjoroge749.replit.app/ — trailing slash included, no variation.
+Never store the access token in localStorage or sessionStorage — keep it in a JavaScript module-level variable only (lost on page refresh, requiring re-login).
+Never open Deriv in a new tab — the Login button must do window.location.href = authUrl (same-window redirect).
+The signal engine (Hurst, Z-Score, Velocity, DTI gates, state machine) must not be modified — only authentication and execution wiring changes.
+Keep the public tick WebSocket running at all times — it is not affected by auth state.
+The OTP WebSocket URL is single-use and short-lived — request a fresh OTP for every trade, do not cache or reuse.

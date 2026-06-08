@@ -1,0 +1,57 @@
+Role: Elite Quantitative TypeScript Engineer
+
+Task: We are executing a massive architectural pivot for the "V75 Analyzer". We are abandoning all retail trading concepts (Market Structure, Liquidity, MACD, RSI) because Volatility 75 is a Pseudo-Random Number Generator (PRNG). The new engine will use a pure statistical "Snapback/Mean-Reversion" strategy targeting high-frequency 2-minute binary options.
+
+Execute the following 5-Phase Architectural Overhaul:
+
+### PHASE 1: Codebase Demolition (Gutting Legacy Logic)
+1. Delete the following files completely. They rely on human market mechanics that do not exist in a PRNG:
+   - `lib/v75/smc.ts` (Order Blocks, FVGs, Sweeps)
+   - `lib/v75/candlePatterns.ts` (Engulfing, Doji)
+   - `lib/v75/microReversal.ts` (Double tops/bottoms)
+   - `lib/v75/scoring.ts` (Legacy multi-timeframe confluence)
+   - `lib/v75/microTrend.ts` (Legacy multi-layer engine)
+2. Open `lib/v75/indicators.ts` and aggressively purge: RSI, MACD, Stochastic, Williams %R, Bulls/Bears Power, and any divergence detection logic. Retain ONLY the M1 ATR (Average True Range) calculation.
+
+### PHASE 2: The Quant Arsenal (Math Functions)
+In `lib/v75/indicators.ts`, build out the following three mathematical formulas designed to process M1 tick data:
+1. Z-Score (Standardized Distance): 
+   - Calculate a 10-period Simple Moving Average (SMA) and its Standard Deviation (SD).
+   - Formula: Z = (CurrentTickPrice - SMA) / SD
+2. Tick Velocity (Rate of Change):
+   - Measure the absolute price distance covered over a rolling 5-second window.
+   - Return this value normalized against the current 14-period M1 ATR (e.g., "1.5x ATR/sec").
+3. Hurst Exponent (H):
+   - Implement a fast Hurst Exponent calculation over a rolling 30-tick window to measure market memory.
+   - H < 0.5 = Mean-reverting (Favorable).
+   - H > 0.5 = Trending (Dangerous, do not fade).
+
+### PHASE 3: The New Core (snapbackEngine.ts)
+Create a new file: `lib/v75/snapbackEngine.ts`. This replaces all previous engines.
+1. State Machine: The engine must strictly manage risk with three states:
+   - `IDLE`: Listening to ticks.
+   - `IN_TRADE`: Deaf to ticks. Initiated when a signal fires. Hard-locked for exactly 120 seconds.
+   - `RESETTING`: Flushes data arrays for 5 seconds after a trade, then returns to `IDLE`.
+2. The Trigger Logic (Evaluated on every live tick, NOT closed candles):
+   - ONLY evaluate if Engine State === `IDLE`.
+   - Gate 1 (Regime): Hurst Exponent must be < 0.45.
+   - Gate 2 (Anomaly): |Z-Score| must be >= 3.0.
+   - Gate 3 (Violence): Tick Velocity must be >= 1.5x ATR in the last 5 seconds.
+   - Firing: If Z-Score is >= 3.0 (Price spiked UP violently), fire a FALL signal. If Z-Score is <= -3.0 (Price spiked DOWN violently), fire a RISE signal.
+   - Immediately shift state to `IN_TRADE` and start the 120s timer.
+
+### PHASE 4: Execution Payload & DB Alignment
+1. Ensure the signal object generated strictly formats a Deriv 2-minute Rise/Fall ticket: 
+   `{ duration: 2, duration_unit: "m", contract_type: "CALL" | "PUT" }`
+2. Erase ALL legacy Stop Loss (SL) and Take Profit (TP) parameters. Binary options do not use them.
+3. Update the database scheduling logic: The outcome check MUST occur exactly 2 minutes after the signal fires, replacing the legacy 15-minute delay.
+
+### PHASE 5: UI Streamlining (V75Analyzer.tsx)
+1. Strip out all legacy UI components (Confluence bars, SMC panels, Multi-TF tables, HMM Regime cards).
+2. Build a sleek, dark-mode quantitative dashboard displaying:
+   - A massive Engine State indicator (If IN_TRADE, show a live 120s countdown).
+   - Live Z-Score Gauge (Highlighting extreme zones > 3.0 or < -3.0).
+   - Live Tick Velocity vs ATR metric.
+   - Live Hurst Exponent readout.
+
+Ensure all TypeScript imports are updated, unused exports are dropped, and the app compiles cleanly. Do not use placeholder data; wire everything directly to the live WebSocket tick stream.

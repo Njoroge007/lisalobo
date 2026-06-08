@@ -1,0 +1,352 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: V75 Analyzer API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: segments
+    description: V75 segment records
+  - name: signals
+    description: V75 signal history
+  - name: conditions
+    description: V75 condition stats
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /segments:
+    get:
+      operationId: listSegments
+      tags: [segments]
+      summary: List segment records
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 500
+      responses:
+        "200":
+          description: List of segment records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SegmentRecord"
+    post:
+      operationId: createSegment
+      tags: [segments]
+      summary: Create a segment record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SegmentInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SegmentRecord"
+
+  /signals:
+    get:
+      operationId: listSignals
+      tags: [signals]
+      summary: List signal history
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: List of signals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SignalRecord"
+    post:
+      operationId: createSignal
+      tags: [signals]
+      summary: Create a signal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignalInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalRecord"
+
+  /signals/{id}/outcome:
+    patch:
+      operationId: updateSignalOutcome
+      tags: [signals]
+      summary: Update signal outcome
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OutcomeUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalRecord"
+
+  /conditions:
+    get:
+      operationId: listConditions
+      tags: [conditions]
+      summary: List condition stats
+      responses:
+        "200":
+          description: List of condition stats
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConditionStat"
+
+  /conditions/bump:
+    post:
+      operationId: bumpConditions
+      tags: [conditions]
+      summary: Bump condition win counts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConditionBump"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    SegmentRecord:
+      type: object
+      required: [id, timestamp, date_str, time_str, open_price, close_price, outcome, point_move, score]
+      properties:
+        id: { type: string }
+        timestamp: { type: number }
+        date_str: { type: string }
+        time_str: { type: string }
+        open_price: { type: number }
+        close_price: { type: number }
+        outcome: { type: ["string", "null"] }
+        point_move: { type: number }
+        score: { type: number }
+        adjusted_score: { type: ["number", "null"] }
+        rsi: { type: ["number", "null"] }
+        stoch_k: { type: ["number", "null"] }
+        stoch_d: { type: ["number", "null"] }
+        macd_histogram: { type: ["number", "null"] }
+        williams_r: { type: ["number", "null"] }
+        cci: { type: ["number", "null"] }
+        bb_position: { type: ["number", "null"] }
+        bb_width: { type: ["number", "null"] }
+        atr: { type: ["number", "null"] }
+        relative_atr: { type: ["number", "null"] }
+        ema9: { type: ["number", "null"] }
+        ema21: { type: ["number", "null"] }
+        ema50: { type: ["number", "null"] }
+        ema200: { type: ["number", "null"] }
+        ema_alignment: { type: ["string", "null"] }
+        has_active_bob: { type: ["boolean", "null"] }
+        has_active_beob: { type: ["boolean", "null"] }
+        ob_timeframe: { type: ["string", "null"] }
+        has_fvg_bull: { type: ["boolean", "null"] }
+        has_fvg_bear: { type: ["boolean", "null"] }
+        choch_detected: { type: ["string", "null"] }
+        liquidity_sweep: { type: ["string", "null"] }
+        h4_bias: { type: ["string", "null"] }
+        h1_bias: { type: ["string", "null"] }
+        top_down_alignment: { type: ["string", "null"] }
+        candle_pattern: { type: ["string", "null"] }
+        structure: { type: ["string", "null"] }
+        rsi_divergence: { type: ["string", "null"] }
+        macd_divergence: { type: ["string", "null"] }
+        hour_of_day: { type: ["integer", "null"] }
+        day_of_week: { type: ["integer", "null"] }
+        dominant_pattern: { type: ["string", "null"] }
+        pattern_score: { type: ["number", "null"] }
+        pattern_direction: { type: ["string", "null"] }
+        m15_bias: { type: ["string", "null"] }
+
+    SegmentInput:
+      type: object
+      required: [timestamp, date_str, time_str, open_price, close_price, outcome, point_move, score]
+      properties:
+        timestamp: { type: number }
+        date_str: { type: string }
+        time_str: { type: string }
+        open_price: { type: number }
+        close_price: { type: number }
+        outcome: { type: ["string", "null"] }
+        point_move: { type: number }
+        score: { type: number }
+        adjusted_score: { type: ["number", "null"] }
+        rsi: { type: ["number", "null"] }
+        stoch_k: { type: ["number", "null"] }
+        stoch_d: { type: ["number", "null"] }
+        macd_histogram: { type: ["number", "null"] }
+        williams_r: { type: ["number", "null"] }
+        cci: { type: ["number", "null"] }
+        bb_position: { type: ["number", "null"] }
+        bb_width: { type: ["number", "null"] }
+        atr: { type: ["number", "null"] }
+        relative_atr: { type: ["number", "null"] }
+        ema9: { type: ["number", "null"] }
+        ema21: { type: ["number", "null"] }
+        ema50: { type: ["number", "null"] }
+        ema200: { type: ["number", "null"] }
+        ema_alignment: { type: ["string", "null"] }
+        has_active_bob: { type: ["boolean", "null"] }
+        has_active_beob: { type: ["boolean", "null"] }
+        ob_timeframe: { type: ["string", "null"] }
+        has_fvg_bull: { type: ["boolean", "null"] }
+        has_fvg_bear: { type: ["boolean", "null"] }
+        choch_detected: { type: ["string", "null"] }
+        liquidity_sweep: { type: ["string", "null"] }
+        h4_bias: { type: ["string", "null"] }
+        h1_bias: { type: ["string", "null"] }
+        top_down_alignment: { type: ["string", "null"] }
+        candle_pattern: { type: ["string", "null"] }
+        structure: { type: ["string", "null"] }
+        rsi_divergence: { type: ["string", "null"] }
+        macd_divergence: { type: ["string", "null"] }
+        hour_of_day: { type: ["integer", "null"] }
+        day_of_week: { type: ["integer", "null"] }
+        dominant_pattern: { type: ["string", "null"] }
+        pattern_score: { type: ["number", "null"] }
+        pattern_direction: { type: ["string", "null"] }
+        m15_bias: { type: ["string", "null"] }
+
+    SignalRecord:
+      type: object
+      required: [id, timestamp, direction, strength, confidence, score, duration_minutes, outcome]
+      properties:
+        id: { type: string }
+        timestamp: { type: number }
+        direction: { type: string }
+        strength: { type: string }
+        confidence: { type: number }
+        score: { type: number }
+        adjusted_score: { type: ["number", "null"] }
+        duration_minutes: { type: number }
+        entry_price: { type: ["number", "null"] }
+        exit_price: { type: ["number", "null"] }
+        outcome: { type: ["string", "null"] }
+        choch_present: { type: ["boolean", "null"] }
+        sweep_present: { type: ["boolean", "null"] }
+        ob_timeframe: { type: ["string", "null"] }
+        h4_bias: { type: ["string", "null"] }
+        h1_bias: { type: ["string", "null"] }
+        pattern_match_rate: { type: ["number", "null"] }
+
+    SignalInput:
+      type: object
+      required: [id, timestamp, direction, strength, confidence, score, duration_minutes]
+      properties:
+        id: { type: string }
+        timestamp: { type: number }
+        direction: { type: string }
+        strength: { type: string }
+        confidence: { type: number }
+        score: { type: number }
+        adjusted_score: { type: ["number", "null"] }
+        duration_minutes: { type: number }
+        entry_price: { type: ["number", "null"] }
+        outcome: { type: ["string", "null"] }
+        choch_present: { type: ["boolean", "null"] }
+        sweep_present: { type: ["boolean", "null"] }
+        ob_timeframe: { type: ["string", "null"] }
+        h4_bias: { type: ["string", "null"] }
+        h1_bias: { type: ["string", "null"] }
+        pattern_match_rate: { type: ["number", "null"] }
+
+    OutcomeUpdate:
+      type: object
+      required: [outcome, exit_price]
+      properties:
+        outcome:
+          type: string
+          enum: [WIN, LOSS]
+        exit_price: { type: number }
+
+    ConditionStat:
+      type: object
+      required: [id, condition_name, weight_multiplier]
+      properties:
+        id: { type: string }
+        condition_name: { type: string }
+        rise_wins: { type: ["integer", "null"] }
+        fall_wins: { type: ["integer", "null"] }
+        total: { type: ["integer", "null"] }
+        accuracy: { type: ["number", "null"] }
+        weight_multiplier: { type: number }
+        updated_at: { type: ["string", "null"] }
+
+    ConditionBump:
+      type: object
+      required: [conditions, outcome]
+      properties:
+        conditions:
+          type: array
+          items:
+            type: string
+        outcome:
+          type: string
+          enum: [RISE, FALL, FLAT]

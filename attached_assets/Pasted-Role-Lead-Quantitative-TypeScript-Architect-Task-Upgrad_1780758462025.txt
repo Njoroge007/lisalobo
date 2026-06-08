@@ -1,0 +1,56 @@
+Role: Lead Quantitative TypeScript Architect
+
+Task: Upgrade the "V75 Momentum Analyzer" from a passive dashboard into a fully automated, OAuth-authenticated Trading Command Center. 
+
+Execution Constraint: You MUST execute this in 3 sequential phases to ensure no compilation errors occur during the transition. Do not skip steps.
+
+### PHASE 1: The OAuth2 Gateway (Client-Side Authentication)
+We are using Deriv's standard client-side OAuth flow.
+1. Create a new file: `lib/v75/derivAuth.ts`.
+2. Build a utility function `parseDerivTokens(url: string)`:
+   - Deriv redirects back to the app with tokens in the URL parameters (e.g., `?token1=xyz&acct1=CR...`).
+   - Extract `token1` and return it. If no token exists, return `null`.
+3. Build a constant for the Login URL:
+   - `export const DERIV_LOGIN_URL = "https://oauth.deriv.com/oauth2/authorize?app_id=YOUR_APP_ID";`
+   - (Leave YOUR_APP_ID as a placeholder string for now).
+
+### PHASE 2: The Command Center UI (V75Analyzer.tsx)
+Update the main React dashboard to handle the new execution states.
+1. Import `parseDerivTokens` and `DERIV_LOGIN_URL`.
+2. On component mount (`useEffect`), check the URL for a token. If found, store it in a React state `[authToken, setAuthToken]` and clean the URL to hide the token from the address bar.
+3. Add a new "Execution Sidebar" to the UI containing:
+   - Auth Status: If `authToken` is null, show a [Login with Deriv] button linked to `DERIV_LOGIN_URL`. If present, show a green "🟢 Authenticated" badge.
+   - Mode Toggle: A switch for `[MANUAL | AUTO]`. State: `executionMode`.
+   - Risk Settings: Number inputs for `Stake ($)`, `Take Profit ($)`, and `Stop Loss ($)`. State: `stakeAmount`, `tpLimit`, `slLimit`.
+   - Manual Trigger: A prominent `[EXECUTE SIGNAL]` button that is strictly disabled UNLESS the engine surfaces a live, valid signal.
+4. Pass these new states (`authToken`, `executionMode`, `stakeAmount`) down to the engine/websocket layer.
+
+### PHASE 3: The Execution Engine & WebSocket Wiring
+Update `lib/v75/websocket.ts` and `lib/v75/momentumEngine.ts` to execute trades directly.
+1. WebSocket Authorization:
+   - When the WebSocket connects, IF `authToken` exists, immediately send: `{ "authorize": authToken }`.
+   - Listen for the `authorize` response to confirm the pipeline is active.
+2. The Engine Execution Callback:
+   - In `momentumEngine.ts`, update the trigger logic (the moment all 4 gates pass: Hurst >= 0.55, 1.5 <= |Z| <= 2.5, Velocity >= 1.2, DTI matches Z direction).
+   - If `Mode === AUTO`: Instantly construct and fire the direct buy payload to the WebSocket:
+     ```json
+     {
+       "buy": 1,
+       "price": stakeAmount,
+       "parameters": {
+         "amount": stakeAmount,
+         "basis": "stake",
+         "contract_type": "CALL" | "PUT",
+         "currency": "USD",
+         "duration": 2,
+         "duration_unit": "m",
+         "symbol": "R_75"
+       }
+     }
+     ```
+   - If `Mode === MANUAL`: Emit an event to the React UI highlighting the `[EXECUTE SIGNAL]` button. If the user clicks it within 10 seconds, fire the exact same buy payload.
+3. Outcome Tracking:
+   - Listen to the WebSocket for the `buy` response to get the `contract_id`.
+   - Append the automated trade to the UI's Signal History list, displaying the actual Deriv execution price alongside the engine's signal price so slippage can be visually tracked.
+
+Ensure all types match and the application compiles cleanly after these three phases are integrated.
