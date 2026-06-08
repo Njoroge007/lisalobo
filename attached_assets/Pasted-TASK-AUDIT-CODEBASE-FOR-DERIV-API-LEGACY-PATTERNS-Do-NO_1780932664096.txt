@@ -1,0 +1,95 @@
+TASK: AUDIT CODEBASE FOR DERIV API LEGACY PATTERNS
+
+Do NOT make any changes yet. Only SEARCH and REPORT. Your job is to find and display all instances of problematic Deriv WebSocket patterns.
+
+SEARCH FOR THESE PATTERNS (in this exact order):
+
+1. LEGACY WEBSOCKET ENDPOINT #1
+   Search all .ts and .tsx files for: wss://ws.derivws.com
+   Command: grep -r "ws\.derivws\.com" lib/ src/ --include="*.ts" --include="*.tsx" -n
+   Display: Full file path, line number, and 3 lines of context (before and after the match)
+
+2. LEGACY WEBSOCKET ENDPOINT #2
+   Search all files for: wss://ws.binaryws.com or wss://red.binaryws.com
+   Command: grep -r "binaryws\.com" lib/ src/ --include="*.ts" --include="*.tsx" -n
+   Display: Full file path, line number, and 3 lines of context
+
+3. LEGACY AUTHORIZE MESSAGE PATTERN
+   Search for: { "authorize" or .authorize( or ws.send(JSON.stringify({ authorize
+   Command: grep -r "authorize" lib/ src/ --include="*.ts" --include="*.tsx" -n | grep -v "// " | grep -v "Authorization:"
+   Display: Full file path, line number, and 5 lines of context
+
+4. WEBSOCKET CONSTRUCTOR WITHOUT OTP
+   Search for: new WebSocket( that is NOT calling /api/deriv/ws-token
+   Command: grep -r "new WebSocket" lib/ src/ --include="*.ts" --include="*.tsx" -n
+   Display: Full file path, line number, and 10 lines of context (show the entire function/handler that contains it)
+
+5. TRADE EXECUTION FUNCTIONS
+   Search for: executeDerivTrade, handleRise, handleFall, onRiseClick, onFallClick, executeTrade
+   Command: grep -r "executeDerivTrade\|handleRise\|handleFall\|onRiseClick\|onFallClick\|executeTrade" lib/ src/ --include="*.ts" --include="*.tsx" -n
+   Display: Full file path, line number, and 20 lines of context (entire function body)
+
+6. API ENDPOINT DEFINITIONS
+   Search for: app.post, router.post, app.get that contain "deriv" or "trade" or "buy" or "proposal"
+   Command: grep -r "app\.post\|router\.post\|app\.get" lib/ src/ --include="*.ts" --include="*.tsx" -n | grep -i "deriv\|trade\|buy\|proposal"
+   Display: Full file path, line number, and 30 lines of context (entire endpoint handler)
+
+7. WEBSOCKET MESSAGE HANDLERS
+   Search for: ws.onmessage, ws.send(JSON.stringify
+   Command: grep -r "ws\.onmessage\|ws\.send.*JSON\.stringify" lib/ src/ --include="*.ts" --include="*.tsx" -n
+   Display: Full file path, line number, and 15 lines of context
+
+8. DEPENDENCIES CHECK
+   Check if @deriv/deriv-api is in package.json:
+   Command: grep -n "@deriv/deriv-api\|@deriv/api\|deriv-api" package.json
+   Display: Full line with version
+
+9. OAUTH/AUTH TOKEN HANDLING
+   Search for: access_token, accessToken being stored/used with WebSocket
+   Command: grep -r "accessToken\|access_token" lib/ src/ --include="*.ts" --include="*.tsx" -n | head -20
+   Display: File, line number, and context
+
+---
+
+AFTER SEARCHING ALL 9 PATTERNS:
+
+Print a summary report with this format:
+
+# CODE AUDIT REPORT
+## Pattern Search Results:
+
+### Pattern 1: Legacy ws.derivws.com
+Status: [FOUND / NOT FOUND]
+Files affected: [list files or "NONE"]
+Count: [number of matches]
+
+[Repeat for all 9 patterns]
+
+## Files That Need Changes:
+[List unique file paths that contain problematic code]
+
+## Critical Issues Found:
+[List each distinct issue found]
+
+---
+
+THEN:
+
+For EACH file found with issues, display the ENTIRE file content in a code block with line numbers. Show complete files, not snippets.
+
+Format:
+=== FILE: lib/path/to/file.ts ===
+[COMPLETE FILE CONTENT WITH LINE NUMBERS]
+
+Do this for ALL files that had matches in the 9 patterns above.
+
+---
+
+CRITICAL RULES:
+- Show EXACT line numbers
+- Show context (not just the matching line)
+- Do NOT fix anything
+- Do NOT skip any matches
+- Do NOT modify any files
+- Display complete file contents for files with issues
+- If a file has multiple issues, show the complete file once (not multiple times)
