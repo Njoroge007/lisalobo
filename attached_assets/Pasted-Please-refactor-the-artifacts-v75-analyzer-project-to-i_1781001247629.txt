@@ -1,0 +1,28 @@
+Please refactor the `artifacts/v75-analyzer` project to implement a complete "Momentum Continuation" architecture for the Volatility 75 index. We are moving away from research prototypes to a production-ready analyzer. 
+
+The core philosophy of this system is: we don't fight the trend, we ride with it. The system must be optimized to generate frequent, accurate signals so there are no long wait times for market predictions.
+
+Please execute the following comprehensive upgrade:
+
+### 1. The Core Engine (`src/lib/v75/momentumEngine.ts`)
+Create or completely refactor the momentum engine class. 
+* **Export Rule:** You MUST export this class using `export default class MomentumEngine` to prevent import errors.
+* **Quantitative Metrics:** The engine must continuously calculate and expose the following data points:
+    * **Hurst Exponent:** To determine if the market is trending, mean-reverting, or random.
+    * **Z-Scores:** To measure statistical deviation and gauge momentum strength.
+    * **ATR-Normalized Velocity:** To standardize price movement speed across different volatility regimes.
+* **Signal Logic:** Implement adaptive thresholds. The engine should adjust its signal generation criteria dynamically based on current volatility to ensure consistent, frequent trade setups.
+
+### 2. The Type Definitions (`src/lib/v75/types.ts` or within the engine file)
+Define strict TypeScript interfaces for the engine's output. 
+* Ensure types like `MomentumMetrics` and `Signal` are exported as named exports (e.g., `export type MomentumMetrics = { ... }`).
+* Include properties for trend direction, signal strength, the current Hurst regime, and the specific entry/exit thresholds.
+
+### 3. The Analyzer Component (`src/components/v75/V75Analyzer.tsx`)
+Refactor the React component to consume the new `MomentumEngine`.
+* **Imports:** Ensure you import the engine correctly: `import MomentumEngine, { type MomentumMetrics } from "@/lib/v75/momentumEngine";`
+* **State Management:** Hook the engine into the component's state so that updates to the Z-score, ATR velocity, and Hurst exponent trigger real-time UI refreshes.
+* **UI/UX:** Display a clean dashboard that highlights the current Momentum Continuation signals. It should be immediately obvious to the user what the current trend is and whether the adaptive thresholds have been crossed to trigger a valid ride.
+
+### 4. Build & Validation
+Once the code is written, automatically run the build scripts involving `pnpm` and `tsc` for the workspace to verify there are no TypeScript errors or missing module exports before handing the code back to me.

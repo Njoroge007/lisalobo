@@ -73,6 +73,10 @@ export const loadSignals = async (limit = 50): Promise<SnapbackSignal[]> => {
       zScore: (Number(r.score) || 0) / 100,
       hurstExponent: (Number(r.adjusted_score) || 5000) / 10000,
       tickVelocity: Number(r.pattern_match_rate) || 0,
+      dti: 0,
+      strength: 0,
+      hurstRegime: "RANDOM",
+      thresholds: { hurst: 0.55, zMin: 1.5, zMax: 2.5, velocity: 1.2, dti: 0.70 },
       outcome: (r.outcome as "WIN" | "LOSS" | "PENDING") || "PENDING",
       exitPrice: r.exit_price != null ? Number(r.exit_price) : undefined,
     }));

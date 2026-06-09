@@ -5,9 +5,9 @@ import {
   authorizeAndGetAccounts, type DerivAccount,
 } from "@/lib/v75/derivAuth";
 import { executeTradeViaOTP, type DurationUnit, DURATION_LIMITS } from "@/lib/v75/derivTrade";
-import type { Candle, SnapbackSignal, EngineState } from "@/lib/v75/types";
+import type { Candle, Signal, SnapbackSignal, EngineState } from "@/lib/v75/types";
 import { computeATR } from "@/lib/v75/indicators";
-import { MomentumEngine, type MomentumMetrics } from "@/lib/v75/momentumEngine";
+import MomentumEngine, { type MomentumMetrics } from "@/lib/v75/momentumEngine";
 import { saveSignal, updateSignalOutcome, loadSignals, flushQueue } from "@/lib/v75/storage";
 import { DerivOptionTicket } from "./DerivOptionTicket";
 
@@ -139,9 +139,15 @@ function DTIGauge({ dti, zScore }: { dti: number; zScore: number }) {
 // ── Engine State Panel ────────────────────────────────────────────────────────
 function EngineStatePanel({ state, countdownMs, activeSignal }: { state: EngineState; countdownMs: number; activeSignal: SnapbackSignal | null }) {
   const sec = Math.ceil(countdownMs / 1000);
-  const pct = state === "IN_TRADE" ? ((120_000 - countdownMs) / 120_000) * 100 : 0;
+  const tradeDurMs = activeSignal
+    ? (activeSignal as any)._cooldownMs ?? 120_000
+    : 120_000;
+  const pct = state === "IN_TRADE" ? ((tradeDurMs - countdownMs) / tradeDurMs) * 100 : 0;
   if (state === "IN_TRADE" && activeSignal) {
-    const isRise = activeSignal.direction === "RISE";
+    const isRise  = activeSignal.direction === "RISE";
+    const strength = (activeSignal as Signal).strength ?? 0;
+    const strengthPct = Math.round(strength * 100);
+    const strengthColor = strengthPct >= 60 ? "#10b981" : strengthPct >= 30 ? "#f59e0b" : "#64748b";
     return (
       <div className="relative overflow-hidden rounded-xl border-2 border-cyan-500/60 bg-zinc-900 p-5 space-y-3">
         <div className="absolute inset-0 bg-cyan-500/5 animate-pulse pointer-events-none" />
@@ -151,13 +157,17 @@ function EngineStatePanel({ state, countdownMs, activeSignal }: { state: EngineS
             <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 relative" />
             <span className="text-sm font-semibold tracking-widest text-cyan-300 uppercase ml-3">IN TRADE</span>
           </div>
-          <span className="text-xs text-zinc-500 font-mono">R_75 · 2-min · MOMENTUM</span>
+          <span className="text-xs text-zinc-500 font-mono">R_75 · MOMENTUM CONTINUATION</span>
         </div>
         <div className="flex items-center gap-4 flex-wrap">
           <div className={`text-4xl font-black tracking-tight ${isRise ? "text-emerald-400" : "text-rose-400"}`}>{isRise ? "▲ RISE" : "▼ FALL"}</div>
           <div className="space-y-0.5"><div className="text-[10px] text-zinc-500">Entry</div><div className="text-base font-mono text-white">{fmt2(activeSignal.entryPrice)}</div></div>
           <div className="space-y-0.5"><div className="text-[10px] text-zinc-500">Z @ entry</div><div className="text-sm font-mono text-cyan-300">{activeSignal.zScore >= 0 ? "+" : ""}{activeSignal.zScore.toFixed(2)}σ</div></div>
-          <div className="space-y-0.5"><div className="text-[10px] text-zinc-500">DTI</div><div className="text-sm font-mono text-cyan-300">{(activeSignal.dti ?? 0) >= 0 ? "+" : ""}{(activeSignal.dti ?? 0).toFixed(2)}</div></div>
+          <div className="space-y-0.5"><div className="text-[10px] text-zinc-500">DTI</div><div className="text-sm font-mono text-cyan-300">{activeSignal.dti >= 0 ? "+" : ""}{activeSignal.dti.toFixed(2)}</div></div>
+          <div className="space-y-0.5">
+            <div className="text-[10px] text-zinc-500">Strength</div>
+            <div className="text-sm font-mono font-bold" style={{ color: strengthColor }}>{strengthPct}%</div>
+          </div>
         </div>
         <div className="space-y-1">
           <div className="flex justify-between text-xs font-mono"><span className="text-zinc-400">Expires in</span><span className="text-cyan-300 font-bold">{sec}s</span></div>
@@ -179,8 +189,8 @@ function EngineStatePanel({ state, countdownMs, activeSignal }: { state: EngineS
   }
   return (
     <div className="rounded-xl border border-emerald-500/30 bg-zinc-900 p-5 space-y-2">
-      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /><span className="text-sm font-semibold tracking-widest text-emerald-300 uppercase">IDLE</span><span className="ml-auto text-xs text-zinc-500">Scanning for momentum…</span></div>
-      <p className="text-xs text-zinc-500">Waiting for: <span className="text-zinc-300">H ≥ 0.55</span>{" · "}<span className="text-zinc-300">1.5 ≤ |Z| ≤ 2.5</span>{" · "}<span className="text-zinc-300">Vel ≥ 1.2×</span>{" · "}<span className="text-zinc-300">|DTI| ≥ 0.70</span></p>
+      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /><span className="text-sm font-semibold tracking-widest text-emerald-300 uppercase">IDLE</span><span className="ml-auto text-xs text-zinc-500">Scanning for momentum continuation…</span></div>
+      <p className="text-xs text-zinc-500">Thresholds auto-adapt to volatility regime — ride with the trend when all 4 gates open.</p>
     </div>
   );
 }
@@ -375,7 +385,7 @@ function AuthPanel({
                   const u = e.target.value as DurationUnit;
                   const lim = DURATION_LIMITS[u];
                   setTradeDurationUnit(u);
-                  setTradeDuration(prev => Math.max(lim.min, Math.min(lim.max, prev)));
+                  setTradeDuration(Math.max(lim.min, Math.min(lim.max, tradeDuration)));
                 }}
                 className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-violet-500 cursor-pointer"
               >
@@ -649,12 +659,18 @@ export function V75Analyzer() {
     return () => client.stop();
   }, [handleTick, handleM1]);
 
-  const { zScore, hurstExponent, tickVelocity, dti, ready } = metrics;
-  const gateHurst = hurstExponent >= 0.55;
-  const gateZ = Math.abs(zScore) >= 1.5 && Math.abs(zScore) <= 2.5;
-  const gateV = tickVelocity >= 1.2;
-  const gateDTI = zScore > 0 ? dti >= 0.70 : zScore < 0 ? dti <= -0.70 : false;
-  const allGates = gateHurst && gateZ && gateV && gateDTI;
+  const {
+    zScore, hurstExponent, tickVelocity, dti, ready,
+    hurstRegime, trendDirection, signalStrength, volatilityFactor,
+    adaptiveThresholds: AT,
+  } = metrics;
+  const gateHurst = hurstExponent >= AT.hurst;
+  const gateZ     = Math.abs(zScore) >= AT.zMin && Math.abs(zScore) <= AT.zMax;
+  const gateV     = tickVelocity >= AT.velocity;
+  const gateDTI   = zScore > 0 ? dti >= AT.dti : zScore < 0 ? dti <= -AT.dti : false;
+  const allGates  = gateHurst && gateZ && gateV && gateDTI;
+  const volLabel  = volatilityFactor > 1.3 ? "HIGH VOL" : volatilityFactor < 0.8 ? "LOW VOL" : "NORMAL";
+  const volColor  = volatilityFactor > 1.3 ? "#f59e0b" : volatilityFactor < 0.8 ? "#64748b" : "#10b981";
 
   const activeSignal = signals[0]?.outcome === "PENDING" && Date.now() - signals[0].timestamp < 120_000 ? signals[0] : null;
   const tickAgo = ((Date.now() - lastTickMs) / 1000).toFixed(1);
@@ -678,6 +694,22 @@ export function V75Analyzer() {
         <div className="flex items-center gap-6">
           <div className="text-center"><div className="text-[10px] text-zinc-500 uppercase tracking-wider">Price</div><div className="text-xl font-mono font-bold text-white">{fmt2(price)}</div></div>
           <div className="text-center"><div className="text-[10px] text-zinc-500 uppercase tracking-wider">ATR (M1·14)</div><div className="text-sm font-mono text-zinc-300">{atrRef.current.toFixed(4)}</div></div>
+          <div className="text-center">
+            <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Trend</div>
+            <div className="text-sm font-mono font-bold" style={{ color: trendDirection === "RISE" ? "#10b981" : trendDirection === "FALL" ? "#f43f5e" : "#64748b" }}>
+              {trendDirection === "RISE" ? "▲ RISE" : trendDirection === "FALL" ? "▼ FALL" : "— FLAT"}
+            </div>
+          </div>
+          <div className="text-center">
+            <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Strength</div>
+            <div className="text-sm font-mono font-bold" style={{ color: signalStrength >= 0.6 ? "#10b981" : signalStrength >= 0.3 ? "#f59e0b" : "#64748b" }}>
+              {Math.round(signalStrength * 100)}%
+            </div>
+          </div>
+          <div className="text-center">
+            <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Vol Regime</div>
+            <div className="text-sm font-mono font-bold" style={{ color: volColor }}>{volLabel}</div>
+          </div>
           <div className="text-center"><div className="text-[10px] text-zinc-500 uppercase tracking-wider">Tick</div><div className="text-sm font-mono text-zinc-400">{tickAgo}s ago</div></div>
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full" style={{ background: connColor }} />
@@ -695,10 +727,10 @@ export function V75Analyzer() {
             </div>
             <div className="space-y-2">
               <div className="text-xs uppercase tracking-widest text-zinc-500 px-1">Gates Check</div>
-              <GateRow label="Gate 1 — Regime" sub="Hurst ≥ 0.55 (Trending)" met={gateHurst} value={`H=${hurstExponent.toFixed(3)}`} />
-              <GateRow label="Gate 2 — Goldilocks" sub="1.5 ≤ |Z| ≤ 2.5" met={gateZ} value={`Z=${zScore >= 0 ? "+" : ""}${zScore.toFixed(2)}`} />
-              <GateRow label="Gate 3 — Fuel" sub="Tick Velocity ≥ 1.2×" met={gateV} value={`${tickVelocity.toFixed(2)}×`} />
-              <GateRow label="Gate 4 — DTI Pressure" sub={zScore > 0 ? "Need DTI ≥ +0.70" : zScore < 0 ? "Need DTI ≤ −0.70" : "Need directional Z first"} met={gateDTI} value={`DTI=${dti >= 0 ? "+" : ""}${dti.toFixed(2)}`} />
+              <GateRow label="Gate 1 — Regime" sub={`Hurst ≥ ${AT.hurst.toFixed(2)} (${hurstRegime})`} met={gateHurst} value={`H=${hurstExponent.toFixed(3)}`} />
+              <GateRow label="Gate 2 — Momentum Z" sub={`${AT.zMin.toFixed(1)} ≤ |Z| ≤ ${AT.zMax.toFixed(1)}`} met={gateZ} value={`Z=${zScore >= 0 ? "+" : ""}${zScore.toFixed(2)}`} />
+              <GateRow label="Gate 3 — Fuel" sub={`Velocity ≥ ${AT.velocity.toFixed(1)}× (${volLabel})`} met={gateV} value={`${tickVelocity.toFixed(2)}×`} />
+              <GateRow label="Gate 4 — DTI Pressure" sub={zScore > 0 ? `Need DTI ≥ +${AT.dti.toFixed(2)}` : zScore < 0 ? `Need DTI ≤ −${AT.dti.toFixed(2)}` : "Need directional Z first"} met={gateDTI} value={`DTI=${dti >= 0 ? "+" : ""}${dti.toFixed(2)}`} />
               <div className={`text-center text-xs font-semibold tracking-widest py-2 rounded border ${allGates ? "text-emerald-300 bg-emerald-500/10 border-emerald-500/20" : "text-zinc-500 bg-zinc-800/40 border-zinc-700/30"}`}>
                 {allGates ? "✓ ALL GATES OPEN" : ready ? "SCANNING…" : "WARMING UP"}
               </div>
