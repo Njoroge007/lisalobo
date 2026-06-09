@@ -63,7 +63,8 @@ export async function executeTradeViaOTP(
           contract_type: contractType,
           currency: "USD",
           duration: clampedDuration,
-          duration_unit: durationUnit
+          duration_unit: durationUnit,
+          underlying_symbol: "R_75",
         },
         req_id: 1,
       }));

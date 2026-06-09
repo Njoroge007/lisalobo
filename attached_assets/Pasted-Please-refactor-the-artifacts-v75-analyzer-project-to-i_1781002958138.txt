@@ -1,0 +1,29 @@
+Please refactor the `artifacts/v75-analyzer` project to implement a complete "Momentum Continuation" architecture for the Volatility 75 index, transitioning it from a prototype to a production-ready system. 
+
+We don't fight the trend; we ride it. The system must generate frequent, accurate signals with minimal wait times, and execute live trades seamlessly via the Deriv API.
+
+Please execute the following fixes and upgrades:
+
+### 1. Fix Trade Execution Payload (`src/lib/v75/derivTrade.ts`)
+* Locate line 58 where the `buy: 1` payload structure is constructed.
+* Deriv API requires the asset parameter to be explicitly named `underlying_symbol` within the `parameters` block. 
+* Map the trade request so that it passes `underlying_symbol: "R_75"` (the exact API asset ID for the Volatility 75 Index) inside the parameters object. Make sure it is not misspelled or genericized as just "symbol".
+* Ensure the trade function reads the selected duration, stake, and contract type (e.g., "RISE" maps to "CALL", "FALL" maps to "PUT") properly from the UI component.
+
+### 2. Implement the Core Engine (`src/lib/v75/momentumEngine.ts`)
+* Refactor or create the momentum engine.
+* Export Rule: You MUST export this class using `export default class MomentumEngine` to prevent application runtime import errors.
+* Quantitative Filters: The engine must continuously calculate and feed the UI with:
+    * Hurst Exponent (to verify if the market is trending or mean-reverting).
+    * Z-Scores (to measure statistical momentum strength).
+    * ATR-Normalized Velocity (to standardize signal speed across changing volatility regimes).
+* Signal Logic: Implement adaptive thresholds that expand and contract based on current market volatility to keep signal frequency high and accurate.
+
+### 3. Update the Analyzer Component (`src/components/v75/V75Analyzer.tsx`)
+* Correct the core import at the top of the file to perfectly match the default export: 
+  `import MomentumEngine, { type MomentumMetrics } from "@/lib/v75/momentumEngine";`
+* Wire the real-time calculated Hurst, Z-score, and ATR metrics into the component's state to update the dashboard panels seamlessly.
+* Hook up the Manual Trade "RISE" and "FALL" buttons directly to the corrected execution service in `derivTrade.ts`.
+
+### 4. Workspace Validation
+* Once the refactor is done, automatically execute build validations via `pnpm` and `tsc` inside the workspace to guarantee there are zero TypeScript compiler or module export errors before returning control to me.
