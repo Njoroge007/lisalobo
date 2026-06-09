@@ -1,1 +1,2 @@
 - [Lovable TanStack Start migration](lovable-tanstack-migration.md) — Lovable apps using TanStack Start need server files deleted; replace Supabase with fetch to /api routes.
+- [V75 5-Layer Engine Architecture](v75-engine-architecture.md) — 5-layer microstructure classifier replacing old 4-gate indicator bot; signals fire only at ≥85% composite probability.

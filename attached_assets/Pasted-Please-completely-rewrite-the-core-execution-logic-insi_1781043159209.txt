@@ -1,0 +1,42 @@
+Please completely rewrite the core execution logic inside `artifacts/v75-analyzer/src/lib/v75/momentumEngine.ts` to implement a 5-Layer Microstructure Regime Classifier. We are upgrading this tool from a basic indicator bot into an institutional-grade "Momentum Continuation" architecture optimized strictly for the Volatility 75 index. 
+
+Do not use traditional lagging indicators (EMA crosses, RSI, MACD) or arbitrary fixed cooldowns. The data feed is an event-driven raw WebSocket tick stream from the Deriv API, and we are targeting directional persistence over a strict 120-second contract horizon.
+
+Implement the following 5 layers, which will output a weighted composite probability score representing the likelihood of a trend surviving the next 120 seconds:
+
+### Layer 1: Compression Engine (20% Weight)
+* Purpose: Detect potential energy accumulation before expansion.
+* Track a `ticks_history` buffer (capable of evaluating the last 200 ticks). 
+* Calculate Range Compression Ratio (RCR): `currentRange(last 50) / averageRange(last 200)`.
+* Calculate Volatility Compression Ratio (VCR): `currentATR(10) / longATR(100)`.
+* Output a 0-100 Compression Score (100 = extremely compressed, 0 = already expanded).
+
+### Layer 2: Expansion Detection Engine (25% Weight)
+* Purpose: Identify the exact kinetic transition from compression to breakout.
+* Calculate Directional Efficiency Ratio (DER): `Net Move / Total Move` over the breakout window. 
+* Calculate Velocity Burst Ratio (VBR): `currentVelocity / baselineVelocity` (ATR-normalized).
+* Output a 0-100 Expansion Score to filter out random tick vibration from true directional intent.
+
+### Layer 3: Structure Persistence (20% Weight)
+* Purpose: Pure price action state tracking.
+* Identify structural swing points (Higher Highs, Higher Lows, Lower Highs, Lower Lows) across 20, 50, and 100-tick micro-windows.
+* Keep a rolling structural score: Bull (+2 for HH, +1 for HL) and Bear (+2 for LL, +1 for LH). 
+* Output a 0-100 Structure Confidence Score based on sequential dominance.
+
+### Layer 4: Multi-Horizon Flow Alignment (20% Weight)
+* Purpose: Measure multi-timeframe directional order flow pressure.
+* Calculate Directional Tick Imbalance (DTI) concurrently across 4 windows: 20, 50, 100, and 200 ticks.
+* The score increases significantly only when all 4 windows align (same directional sign, and magnitude > 0.65). Output a 0-100 Flow Alignment Score.
+
+### Layer 5: Momentum Persistence Predictor (15% Weight)
+* Purpose: Measure acceleration to filter out exhausting/dying moves.
+* Track the slope and derivative of tick velocity (`dVelocity/dt`). 
+* If velocity is high but the slope is negative (momentum exhaustion), the score drops heavily. If the slope is positive (accelerating), the score peaks. Output a 0-100 Persistence Score.
+
+### Signal Execution & UI Integration
+* The final engine must combine these 5 scores into a master `Probability Score` (0% to 100%).
+* Establish Signal Tiers: <70% (Reject), 70-79% (Watch), 80-84% (Candidate), 85-89% (Trade), 90%+ (Premium Trade).
+* The execution manager should only fire the payload for a Momentum Continuation trade if the Probability Score hits 85% or higher.
+* Ensure all React frontend UI components and dashboards in the workspace subscribe to these new Layer outputs and the Final Probability Score instead of the old Z-Score/Hurst metrics. 
+
+Run a complete workspace build script (e.g., pnpm build / tsc) when done to confirm the typescript architecture changes are live with zero syntax errors.

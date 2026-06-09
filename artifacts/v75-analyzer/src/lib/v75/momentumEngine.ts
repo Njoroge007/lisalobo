@@ -1,46 +1,80 @@
 import type {
-  Tick, EngineState, HurstRegime, AdaptiveThresholds,
-  Signal, MomentumMetrics,
+  Tick, EngineState, Signal, MomentumMetrics, LayerScores, SignalTier,
+  HurstRegime, AdaptiveThresholds,
 } from "./types";
 import {
   computeZScoreComponents,
-  computeTickVelocity,
   computeHurst,
+  computeTickVelocity,
   computeTickImbalance,
+  computeCompressionLayer,
+  computeExpansionLayer,
+  computeStructureLayer,
+  computeFlowAlignmentLayer,
+  computePersistenceLayer,
+  type VelSample,
 } from "./indicators";
 
 export type { MomentumMetrics } from "./types";
 
-const TICK_WINDOW_MS   = 5_000;
-const TICK_HISTORY_MAX = 500;
-const ATR_BASELINE_WIN = 50;
-const Z_PERIOD         = 10;
-const HURST_PERIOD     = 30;
-const DTI_PERIOD       = 15;
-const RESETTING_MS     = 5_000;
+const TICK_HISTORY_MAX  = 500;
+const ATR_BASELINE_WIN  = 100;
+const READY_MIN_TICKS   = 100;
+const RESETTING_MS      = 5_000;
+const TRADE_DURATION_MS = 120_000;
+const VEL_SAMPLE_INTERVAL_MS = 300;
+const VEL_HISTORY_MAX   = 20;
 
-const BASE_THRESHOLDS: AdaptiveThresholds = {
-  hurst:    0.55,
-  zMin:     1.5,
-  zMax:     2.5,
-  velocity: 1.2,
-  dti:      0.70,
+const TIER_MIN: Record<SignalTier, number> = {
+  PREMIUM: 90, TRADE: 85, CANDIDATE: 80, WATCH: 70, REJECT: 0,
+};
+
+const WEIGHTS = { compression: 0.20, expansion: 0.25, structure: 0.20, flowAlignment: 0.20, persistence: 0.15 };
+
+const LEGACY_THRESHOLDS: AdaptiveThresholds = {
+  hurst: 0.55, zMin: 1.5, zMax: 2.5, velocity: 1.2, dti: 0.70,
+};
+
+const DEFAULT_LAYER_SCORES: LayerScores = {
+  compression: 0, expansion: 0, structure: 50, flowAlignment: 20, persistence: 50,
 };
 
 const DEFAULT_METRICS: MomentumMetrics = {
-  zScore: 0, hurstExponent: 0.5, tickVelocity: 0, dti: 0,
-  atr: 0, sma10: 0, sd10: 0, ready: false,
-  hurstRegime: "RANDOM", trendDirection: "FLAT",
-  signalStrength: 0, volatilityFactor: 1,
-  adaptiveThresholds: { ...BASE_THRESHOLDS },
+  layerScores:     { ...DEFAULT_LAYER_SCORES },
+  probabilityScore: 0,
+  tier:            "REJECT",
+  trendDirection:  "FLAT",
+  flowDirection:   "NEUTRAL",
+  atr:             0,
+  ready:           false,
+  volatilityFactor: 1,
+  zScore:          0,
+  hurstExponent:   0.5,
+  tickVelocity:    0,
+  dti:             0,
+  sma10:           0,
+  sd10:            0,
+  hurstRegime:     "RANDOM",
+  signalStrength:  0,
+  adaptiveThresholds: { ...LEGACY_THRESHOLDS },
 };
+
+function classifyTier(prob: number): SignalTier {
+  if (prob >= TIER_MIN.PREMIUM)   return "PREMIUM";
+  if (prob >= TIER_MIN.TRADE)     return "TRADE";
+  if (prob >= TIER_MIN.CANDIDATE) return "CANDIDATE";
+  if (prob >= TIER_MIN.WATCH)     return "WATCH";
+  return "REJECT";
+}
 
 export default class MomentumEngine {
   private state: EngineState = "IDLE";
   private ticks: Tick[] = [];
   private atrHistory: number[] = [];
-  private tradeEndMs  = 0;
-  private resetEndMs  = 0;
+  private velocityHistory: VelSample[] = [];
+  private lastVelSampleMs = 0;
+  private tradeEndMs = 0;
+  private resetEndMs = 0;
   private lastMetrics: MomentumMetrics = { ...DEFAULT_METRICS };
 
   getState(): EngineState { return this.state; }
@@ -69,83 +103,123 @@ export default class MomentumEngine {
 
     if (this.state === "IN_TRADE") {
       if (now >= this.tradeEndMs) {
-        this.state = "RESETTING";
+        this.state   = "RESETTING";
         this.resetEndMs = now + RESETTING_MS;
       }
-      this.updateMetrics(atr);
+      this.updateMetrics(atr, now);
       return null;
     }
 
     if (this.state === "RESETTING") {
       if (now >= this.resetEndMs) {
-        this.ticks = [];
-        this.state = "IDLE";
+        this.ticks           = [];
+        this.velocityHistory = [];
+        this.state           = "IDLE";
       }
-      this.updateMetrics(atr);
+      this.updateMetrics(atr, now);
       return null;
     }
 
-    this.updateMetrics(atr);
+    this.updateMetrics(atr, now);
     if (!this.lastMetrics.ready) return null;
 
-    const {
-      zScore, hurstExponent, tickVelocity, dti,
-      adaptiveThresholds: t, hurstRegime, signalStrength, volatilityFactor,
-    } = this.lastMetrics;
+    const { probabilityScore, tier, flowDirection } = this.lastMetrics;
 
-    const absZ = Math.abs(zScore);
+    if (tier === "REJECT" || tier === "WATCH" || tier === "CANDIDATE") return null;
+    if (flowDirection === "NEUTRAL") return null;
 
-    if (hurstExponent < t.hurst)        return null;
-    if (absZ < t.zMin || absZ > t.zMax) return null;
-    if (tickVelocity  < t.velocity)     return null;
-    if (zScore > 0 && dti  <  t.dti)   return null;
-    if (zScore < 0 && dti  > -t.dti)   return null;
+    const direction = flowDirection as "RISE" | "FALL";
+    this.state      = "IN_TRADE";
+    this.tradeEndMs = now + TRADE_DURATION_MS;
 
-    const direction: "RISE" | "FALL" = zScore > 0 ? "RISE" : "FALL";
-    const cooldownMs = this.adaptiveCooldown(volatilityFactor);
-
-    this.state = "IN_TRADE";
-    this.tradeEndMs = now + cooldownMs;
+    const { layerScores, zScore, hurstExponent, tickVelocity, dti, hurstRegime } = this.lastMetrics;
 
     return {
-      id:            crypto.randomUUID(),
-      timestamp:     now,
+      id:              crypto.randomUUID(),
+      timestamp:       now,
       direction,
-      entryPrice:    price,
-      strength:      signalStrength,
+      entryPrice:      price,
+      strength:        probabilityScore / 100,
+      probabilityScore,
+      tier,
+      layerScores:     { ...layerScores },
       zScore,
       hurstExponent,
       tickVelocity,
       dti,
       hurstRegime,
-      thresholds:    { ...t },
-      outcome:       "PENDING",
+      thresholds:      { ...LEGACY_THRESHOLDS },
+      outcome:         "PENDING",
     };
   }
 
-  private updateMetrics(atr: number) {
+  private updateMetrics(atr: number, now: number) {
     const prices = this.ticks.map(t => t.price);
-    const { zScore, sma, sd } = computeZScoreComponents(prices, Z_PERIOD);
-    const hurstExponent = computeHurst(prices, HURST_PERIOD);
-    const tickVelocity  = computeTickVelocity(this.ticks, TICK_WINDOW_MS, atr);
-    const dti           = computeTickImbalance(prices, DTI_PERIOD);
-    const ready         = prices.length >= Math.max(Z_PERIOD, DTI_PERIOD);
+    const ready  = prices.length >= READY_MIN_TICKS;
 
-    const vf                 = this.getVolatilityFactor(atr);
-    const adaptiveThresholds = this.getAdaptiveThresholds(vf);
-    const hurstRegime        = this.getHurstRegime(hurstExponent);
-    const trendDirection     = zScore > 0.3 ? "RISE" as const
-                             : zScore < -0.3 ? "FALL" as const
-                             : "FLAT" as const;
-    const signalStrength = this.computeStrength(
-      hurstExponent, Math.abs(zScore), tickVelocity, Math.abs(dti), adaptiveThresholds,
+    const { zScore, sma, sd } = computeZScoreComponents(prices, 10);
+    const hurstExponent       = computeHurst(prices, 30);
+    const tickVelocity        = computeTickVelocity(this.ticks, 5_000, atr);
+    const dti                 = computeTickImbalance(prices, 15);
+    const hurstRegime: HurstRegime = hurstExponent >= 0.60 ? "TRENDING"
+      : hurstExponent >= 0.50 ? "RANDOM" : "MEAN_REVERTING";
+
+    if (now - this.lastVelSampleMs >= VEL_SAMPLE_INTERVAL_MS) {
+      this.velocityHistory.push({ v: tickVelocity, ms: now });
+      if (this.velocityHistory.length > VEL_HISTORY_MAX) this.velocityHistory.shift();
+      this.lastVelSampleMs = now;
+    }
+
+    const vf = this.getVolatilityFactor(atr);
+
+    if (!ready) {
+      this.lastMetrics = {
+        ...DEFAULT_METRICS,
+        zScore, hurstExponent, tickVelocity, dti, atr,
+        sma10: sma, sd10: sd, hurstRegime, volatilityFactor: vf,
+      };
+      return;
+    }
+
+    const L1 = computeCompressionLayer(prices);
+    const L2 = computeExpansionLayer(prices, this.ticks, atr);
+    const L3 = computeStructureLayer(prices, [20, 50, 100]);
+    const L4 = computeFlowAlignmentLayer(prices, [20, 50, 100, 200]);
+    const L5 = computePersistenceLayer(this.velocityHistory, tickVelocity);
+
+    const layerScores: LayerScores = {
+      compression:  L1.score,
+      expansion:    L2.score,
+      structure:    L3.score,
+      flowAlignment: L4.score,
+      persistence:  L5.score,
+    };
+
+    const probabilityScore = Math.round(
+      L1.score * WEIGHTS.compression  +
+      L2.score * WEIGHTS.expansion    +
+      L3.score * WEIGHTS.structure    +
+      L4.score * WEIGHTS.flowAlignment +
+      L5.score * WEIGHTS.persistence,
     );
 
+    const tier          = classifyTier(probabilityScore);
+    const flowDirection = L4.direction;
+
+    const trendDirection: "RISE" | "FALL" | "FLAT" =
+      flowDirection !== "NEUTRAL" ? flowDirection
+      : L3.bias === "BULL"  ? "RISE"
+      : L3.bias === "BEAR"  ? "FALL"
+      : "FLAT";
+
     this.lastMetrics = {
-      zScore, hurstExponent, tickVelocity, dti, atr,
-      sma10: sma, sd10: sd, ready,
-      hurstRegime, trendDirection, signalStrength,
-      volatilityFactor: vf, adaptiveThresholds,
+      layerScores, probabilityScore, tier,
+      trendDirection, flowDirection,
+      atr, ready, volatilityFactor: vf,
+      zScore, hurstExponent, tickVelocity, dti,
+      sma10: sma, sd10: sd, hurstRegime,
+      signalStrength: probabilityScore / 100,
+      adaptiveThresholds: { ...LEGACY_THRESHOLDS },
     };
   }
 
@@ -154,34 +228,5 @@ export default class MomentumEngine {
     const baseline = this.atrHistory.reduce((a, b) => a + b, 0) / this.atrHistory.length;
     if (baseline <= 0) return 1.0;
     return Math.max(0.5, Math.min(2.0, currentAtr / baseline));
-  }
-
-  private getAdaptiveThresholds(vf: number): AdaptiveThresholds {
-    if (vf > 1.3) return { hurst: 0.52, zMin: 1.2, zMax: 3.0, velocity: 1.0, dti: 0.58 };
-    if (vf < 0.8) return { hurst: 0.58, zMin: 1.8, zMax: 2.3, velocity: 1.4, dti: 0.78 };
-    return { ...BASE_THRESHOLDS };
-  }
-
-  private adaptiveCooldown(vf: number): number {
-    if (vf > 1.5) return 60_000;
-    if (vf > 1.2) return 90_000;
-    return 120_000;
-  }
-
-  private getHurstRegime(h: number): HurstRegime {
-    if (h >= 0.60) return "TRENDING";
-    if (h >= 0.50) return "RANDOM";
-    return "MEAN_REVERTING";
-  }
-
-  private computeStrength(
-    h: number, absZ: number, v: number, absDTI: number, t: AdaptiveThresholds,
-  ): number {
-    const hScore = Math.max(0, (h - t.hurst) / (1 - t.hurst));
-    const zRange = t.zMax - t.zMin;
-    const zS     = zRange > 0 ? Math.max(0, Math.min(1, (absZ - t.zMin) / zRange)) : 0;
-    const vScore = Math.max(0, Math.min(1, (v - t.velocity) / (t.velocity * 2)));
-    const dScore = Math.max(0, Math.min(1, (absDTI - t.dti) / (1 - t.dti)));
-    return Math.round((hScore + zS + vScore + dScore) * 25);
   }
 }
