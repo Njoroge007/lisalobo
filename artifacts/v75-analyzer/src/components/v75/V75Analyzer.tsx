@@ -4,7 +4,7 @@ import {
   initiateLogin, handleOAuthCallback, clearAccessToken, getAccessToken,
   authorizeAndGetAccounts, type DerivAccount,
 } from "@/lib/v75/derivAuth";
-import { executeTradeViaOTP, type DurationUnit, type ContractUpdate, DURATION_LIMITS } from "@/lib/v75/derivTrade";
+import { executeTradeViaOTP, sellContract, type DurationUnit, type ContractUpdate, DURATION_LIMITS } from "@/lib/v75/derivTrade";
 import type { Candle, Signal, SnapbackSignal, EngineState } from "@/lib/v75/types";
 import { computeATR } from "@/lib/v75/indicators";
 import MomentumEngine, { type MomentumMetrics } from "@/lib/v75/momentumEngine";
@@ -27,7 +27,17 @@ interface ContractRecord {
   profit: number; profitPct: number;
   status: "open" | "sold" | "expired";
   isSold: boolean;
+  stake: number;
+  payout: number;
+  bidPrice: number;
+  dateExpiry: number;
+  durationMs: number;
+  isSelling?: boolean;
 }
+
+const UNIT_MS: Record<DurationUnit, number> = {
+  t: 2_000, s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000,
+};
 
 // ── Z-Score Goldilocks Gauge ──────────────────────────────────────────────────
 function ZGoldilocks({ z }: { z: number }) {
@@ -208,45 +218,146 @@ function GateRow({ label, met, value, sub }: { label: string; met: boolean; valu
   );
 }
 
-// ── Signal Row ────────────────────────────────────────────────────────────────
-function SignalRow({ sig, contract }: { sig: SnapbackSignal; contract?: ContractRecord }) {
-  const isRise = sig.direction === "RISE";
-  const time = new Date(sig.timestamp).toLocaleTimeString("en-US", { hour12: false });
-  const hasLivePnl = contract && !contract.isSold && contract.status === "open";
-  const hasFinalPnl = contract && contract.isSold;
-  const pnlColor = (contract?.profit ?? 0) >= 0 ? "#10b981" : "#f43f5e";
+// ── Contract Monitor Components ───────────────────────────────────────────────
+function CountdownTimer({ dateExpiry, startTs }: { dateExpiry: number; startTs: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, []);
+  const expiryMs = dateExpiry * 1000;
+  const remainMs = Math.max(0, expiryMs - now);
+  const totalMs  = expiryMs - startTs;
+  const pct = totalMs > 0 ? Math.max(0, Math.min(100, (remainMs / totalMs) * 100)) : 0;
+  const hrs  = Math.floor(remainMs / 3_600_000);
+  const mins = Math.floor((remainMs % 3_600_000) / 60_000);
+  const secs = Math.floor((remainMs % 60_000) / 1_000);
+  const timeStr = hrs > 0
+    ? `${String(hrs).padStart(2,"0")}:${String(mins).padStart(2,"0")}:${String(secs).padStart(2,"0")}`
+    : `00:${String(mins).padStart(2,"0")}:${String(secs).padStart(2,"0")}`;
   return (
-    <div className="py-2 border-b border-zinc-800/60 text-xs font-mono space-y-1">
-      <div className="flex items-center gap-3 flex-wrap">
-        <span className={`px-1.5 py-0.5 rounded font-bold ${isRise ? "bg-emerald-500/15 text-emerald-300" : "bg-rose-500/15 text-rose-300"}`}>{isRise ? "▲ RISE" : "▼ FALL"}</span>
-        <span className="text-zinc-400">{time}</span>
-        <span className="text-zinc-300">{fmt2(sig.entryPrice)}</span>
-        <span className="text-zinc-500">Z={sig.zScore >= 0 ? "+" : ""}{sig.zScore.toFixed(2)}</span>
-        <span className="text-zinc-500">H={sig.hurstExponent.toFixed(2)}</span>
-        <span className="text-zinc-500">DTI={(sig.dti ?? 0) >= 0 ? "+" : ""}{(sig.dti ?? 0).toFixed(2)}</span>
-        {hasLivePnl && (
-          <span className="font-bold animate-pulse" style={{ color: pnlColor }}>
-            {(contract.profit >= 0 ? "+" : "")}{contract.profit.toFixed(2)} ({contract.profitPct >= 0 ? "+" : ""}{contract.profitPct.toFixed(1)}%)
-          </span>
-        )}
-        {hasFinalPnl && (
-          <span className="font-bold" style={{ color: pnlColor }}>
-            {(contract.profit >= 0 ? "+" : "")}{contract.profit.toFixed(2)} FINAL
-          </span>
-        )}
-        <span className={`ml-auto px-1.5 py-0.5 rounded text-[10px] ${sig.outcome === "WIN" ? "bg-emerald-500/15 text-emerald-400" : sig.outcome === "LOSS" ? "bg-rose-500/15 text-rose-400" : "bg-zinc-700/40 text-zinc-400"}`}>{sig.outcome}</span>
+    <div className="flex flex-col gap-1.5 items-center min-w-[90px]">
+      <span className="text-zinc-200 text-[12px] font-mono tracking-widest">
+        {dateExpiry > 0 ? timeStr : "–:––:––"}
+      </span>
+      <div className="w-full h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+        <div className="h-full rounded-full bg-emerald-400 transition-all duration-500"
+             style={{ width: `${pct}%` }} />
       </div>
-      {contract && (
-        <div className="flex items-center gap-4 pl-1 text-[10px] text-zinc-500 flex-wrap">
-          <span className="text-violet-400">#{contract.contractId}</span>
-          <span>Signal: {fmt2(contract.signalPrice)}</span>
-          <span>Exec: {fmt2(contract.derivPrice)}</span>
-          <span className={Math.abs(contract.slippage) > 0.5 ? "text-amber-400" : ""}>
-            Slip: {contract.slippage >= 0 ? "+" : ""}{contract.slippage.toFixed(4)}
-          </span>
-          {contract.status !== "open" && (
-            <span className={`px-1 py-0.5 rounded uppercase ${contract.status === "sold" ? "text-cyan-400 bg-cyan-500/10" : "text-zinc-400 bg-zinc-700/30"}`}>{contract.status}</span>
-          )}
+    </div>
+  );
+}
+
+function ContractRow({ contract, onSell }: { contract: ContractRecord; onSell: (id: number) => void }) {
+  const isRise = contract.direction === "RISE";
+  const plPos  = contract.profit >= 0;
+  return (
+    <div className="grid gap-x-4 items-center px-5 py-4 border-b border-zinc-800/40 text-sm font-mono hover:bg-zinc-800/20 transition-colors"
+         style={{ gridTemplateColumns: "64px 1fr 72px 80px 100px 120px 120px 130px" }}>
+      {/* Type */}
+      <div className="flex items-center gap-1.5 shrink-0">
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+          <rect x="1" y="12" width="3" height="7" fill="#06b6d4" rx="0.5"/>
+          <rect x="6" y="7"  width="3" height="12" fill="#06b6d4" rx="0.5"/>
+          <rect x="11" y="4" width="3" height="15" fill="#06b6d4" rx="0.5"/>
+          <rect x="16" y="9" width="3" height="10" fill="#06b6d4" rx="0.5"/>
+        </svg>
+        <span className={`text-base font-bold leading-none ${isRise ? "text-emerald-400" : "text-rose-400"}`}>
+          {isRise ? "↗" : "↘"}
+        </span>
+      </div>
+      {/* Ref. ID */}
+      <span className="text-zinc-200 truncate">{contract.contractId}</span>
+      {/* Currency */}
+      <span className="inline-flex items-center justify-center px-2 py-0.5 rounded border border-zinc-600/80 text-zinc-300 text-[11px] font-semibold bg-zinc-800/60 w-fit">
+        USD
+      </span>
+      {/* Stake */}
+      <span className="text-zinc-200">{fmt2(contract.stake)}</span>
+      {/* Potential payout */}
+      <span className="text-zinc-200">{contract.payout > 0 ? fmt2(contract.payout) : "–"}</span>
+      {/* Total profit/loss */}
+      <div className="flex items-center gap-1">
+        <span className={`font-bold ${plPos ? "text-emerald-400" : "text-rose-400"}`}>
+          {plPos ? "+" : ""}{fmt2(contract.profit)}
+        </span>
+        <span className={`text-[10px] ${plPos ? "text-emerald-500" : "text-rose-500"}`}>▲</span>
+      </div>
+      {/* Contract value + Sell button */}
+      <div className="flex flex-col items-start gap-1.5">
+        <div className="flex items-center gap-1">
+          <span className="font-bold text-cyan-400">{contract.bidPrice > 0 ? fmt2(contract.bidPrice) : "–"}</span>
+          {contract.bidPrice > 0 && <span className="text-[10px] text-cyan-500">▲</span>}
+        </div>
+        <button
+          onClick={() => onSell(contract.contractId)}
+          disabled={!!contract.isSelling}
+          className="px-4 py-1 bg-zinc-700 hover:bg-zinc-600 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed border border-zinc-500/70 text-white text-[11px] font-bold rounded transition-all whitespace-nowrap"
+        >
+          {contract.isSelling ? "…" : "Sell"}
+        </button>
+      </div>
+      {/* Remaining time */}
+      <CountdownTimer dateExpiry={contract.dateExpiry} startTs={contract.timestamp} />
+    </div>
+  );
+}
+
+function SettledRow({ contract }: { contract: ContractRecord }) {
+  const isRise = contract.direction === "RISE";
+  const win    = contract.profit >= 0;
+  const time   = new Date(contract.timestamp).toLocaleTimeString("en-US", { hour12: false });
+  return (
+    <div className="flex items-center gap-4 px-5 py-2 text-[11px] font-mono border-b border-zinc-800/20 hover:bg-zinc-800/10">
+      <span className={isRise ? "text-emerald-400" : "text-rose-400"}>{isRise ? "↗ RISE" : "↘ FALL"}</span>
+      <span className="text-zinc-400">#{contract.contractId}</span>
+      <span className="text-zinc-600">{time}</span>
+      <span className="text-zinc-500 ml-1">{fmt2(contract.stake)} stake</span>
+      <span className={`font-bold ml-auto ${win ? "text-emerald-400" : "text-rose-400"}`}>
+        {win ? "+" : ""}{fmt2(contract.profit)}
+      </span>
+      <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase font-semibold ${win ? "text-emerald-400 bg-emerald-500/10" : "text-rose-400 bg-rose-500/10"}`}>
+        {win ? "WIN" : "LOSS"}
+      </span>
+    </div>
+  );
+}
+
+function ContractMonitorPanel({ contracts, onSell }: { contracts: ContractRecord[]; onSell: (id: number) => void }) {
+  const open   = contracts.filter(c => !c.isSold && c.status === "open");
+  const closed = contracts.filter(c => c.isSold || c.status !== "open");
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
+        <span className="text-xs uppercase tracking-widest text-zinc-400">Open Contracts</span>
+        <span className="text-[10px] text-zinc-600 font-mono">{open.length} live · {closed.length} settled</span>
+      </div>
+      {open.length > 0 ? (
+        <>
+          <div className="grid gap-x-4 px-5 py-2 border-b border-zinc-800/60 text-[10px] uppercase tracking-wider text-zinc-500 font-semibold select-none"
+               style={{ gridTemplateColumns: "64px 1fr 72px 80px 100px 120px 120px 130px" }}>
+            <span>Type</span>
+            <span>Ref. ID</span>
+            <span>Currency</span>
+            <span>Stake</span>
+            <span className="leading-tight">Potential<br/>payout</span>
+            <span className="leading-tight">Total<br/>profit/loss</span>
+            <span className="leading-tight">Contract<br/>value</span>
+            <span className="leading-tight">Remaining<br/>time</span>
+          </div>
+          {open.map(c => <ContractRow key={c.contractId} contract={c} onSell={onSell} />)}
+        </>
+      ) : (
+        <div className="text-xs text-zinc-600 text-center py-8">
+          No open contracts — execute a trade to monitor it here.
+        </div>
+      )}
+      {closed.length > 0 && (
+        <div className="border-t border-zinc-800/60">
+          <div className="px-5 py-2 text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">Settled</div>
+          <div className="overflow-y-auto max-h-40">
+            {closed.slice(0, 30).map(c => <SettledRow key={c.contractId} contract={c} />)}
+          </div>
         </div>
       )}
     </div>
@@ -597,10 +708,18 @@ export function V75Analyzer() {
     setExecError("");
     try {
       const contractType = sig.direction === "RISE" ? "CALL" : "PUT";
+      const durationMs = dur * UNIT_MS[durUnit];
       const onUpdate = (update: ContractUpdate) => {
         setContracts(prev => prev.map(c =>
           c.contractId === update.contractId
-            ? { ...c, profit: update.profit, profitPct: update.profitPct, status: update.status, isSold: update.isSold }
+            ? {
+                ...c,
+                profit: update.profit, profitPct: update.profitPct,
+                status: update.status, isSold: update.isSold,
+                bidPrice: update.bidPrice,
+                payout: update.payout > 0 ? update.payout : c.payout,
+                dateExpiry: update.dateExpiry > 0 ? update.dateExpiry : c.dateExpiry,
+              }
             : c,
         ));
         if (update.isSold) {
@@ -617,6 +736,7 @@ export function V75Analyzer() {
         signalPrice: sig.entryPrice, derivPrice: result.buyPrice,
         slippage: result.buyPrice - sig.entryPrice, timestamp: Date.now(),
         profit: 0, profitPct: 0, status: "open" as const, isSold: false,
+        stake: result.buyPrice, payout: 0, bidPrice: 0, dateExpiry: 0, durationMs,
       }, ...prev].slice(0, 50));
     } catch (e: any) {
       setExecError(e?.message ?? "Trade execution failed");
@@ -643,10 +763,18 @@ export function V75Analyzer() {
     try {
       const contractType = direction === "RISE" ? "CALL" : "PUT";
       const manualId = `manual-${Date.now()}`;
+      const durationMs = dur * UNIT_MS[durUnit];
       const onUpdate = (update: ContractUpdate) => {
         setContracts(prev => prev.map(c =>
           c.contractId === update.contractId
-            ? { ...c, profit: update.profit, profitPct: update.profitPct, status: update.status, isSold: update.isSold }
+            ? {
+                ...c,
+                profit: update.profit, profitPct: update.profitPct,
+                status: update.status, isSold: update.isSold,
+                bidPrice: update.bidPrice,
+                payout: update.payout > 0 ? update.payout : c.payout,
+                dateExpiry: update.dateExpiry > 0 ? update.dateExpiry : c.dateExpiry,
+              }
             : c,
         ));
       };
@@ -657,9 +785,28 @@ export function V75Analyzer() {
         signalPrice: p, derivPrice: result.buyPrice,
         slippage: result.buyPrice - p, timestamp: Date.now(),
         profit: 0, profitPct: 0, status: "open" as const, isSold: false,
+        stake: result.buyPrice, payout: 0, bidPrice: 0, dateExpiry: 0, durationMs,
       }, ...prev].slice(0, 50));
     } catch (e: any) {
       setExecError(e?.message ?? "Trade execution failed");
+    }
+  }, []);
+
+  // ── Sell open contract ──
+  const handleSell = useCallback(async (contractId: number) => {
+    const acctId = selectedAccountRef.current;
+    if (!acctId || !getAccessToken()) { setExecError("Not authenticated"); return; }
+    setContracts(prev => prev.map(c => c.contractId === contractId ? { ...c, isSelling: true } : c));
+    try {
+      const { sellPrice } = await sellContract(API, acctId, contractId);
+      setContracts(prev => prev.map(c =>
+        c.contractId === contractId
+          ? { ...c, status: "sold" as const, isSold: true, bidPrice: sellPrice, profit: sellPrice - c.stake, isSelling: false }
+          : c,
+      ));
+    } catch (e: any) {
+      setContracts(prev => prev.map(c => c.contractId === contractId ? { ...c, isSelling: false } : c));
+      setExecError(e?.message ?? "Sell failed");
     }
   }, []);
 
@@ -812,15 +959,7 @@ export function V75Analyzer() {
             </div>
           </div>
 
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-xs uppercase tracking-widest text-zinc-400">Signal History</span>
-              <span className="text-[10px] text-zinc-600 font-mono">{signals.length} signals · {contracts.length} executed</span>
-            </div>
-            {loading ? <div className="text-xs text-zinc-500 text-center py-6">Loading…</div>
-              : signals.length === 0 ? <div className="text-xs text-zinc-600 text-center py-6">No signals yet. All 4 gates must open simultaneously.</div>
-              : <div className="overflow-y-auto max-h-64">{signals.slice(0, 30).map(sig => <SignalRow key={sig.id} sig={sig} contract={contracts.find(c => c.signalId === sig.id)} />)}</div>}
-          </div>
+          <ContractMonitorPanel contracts={contracts} onSell={handleSell} />
         </div>
 
         {/* ── Auth + Execution Sidebar ── */}

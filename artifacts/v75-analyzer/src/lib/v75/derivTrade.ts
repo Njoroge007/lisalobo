@@ -15,6 +15,9 @@ export interface ContractUpdate {
   currentSpot: number;
   isSold: boolean;
   status: "open" | "sold" | "expired";
+  dateExpiry: number;  // unix seconds from Deriv
+  bidPrice: number;    // current sell / contract value
+  payout: number;      // max potential payout
 }
 
 export const DURATION_LIMITS: Record<DurationUnit, { min: number; max: number; label: string }> = {
@@ -60,7 +63,6 @@ export async function executeTradeViaOTP(
     let buyResolved = false;
     let monitorTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // 20s timeout for buy confirmation
     const buyTimeout = setTimeout(() => {
       if (!buyResolved) {
         ws.close();
@@ -89,7 +91,6 @@ export async function executeTradeViaOTP(
       let d: any;
       try { d = JSON.parse(ev.data as string); } catch { return; }
 
-      // Any API error before buy resolved → reject
       if (d.error && !buyResolved) {
         clearTimeout(buyTimeout);
         ws.close();
@@ -97,7 +98,6 @@ export async function executeTradeViaOTP(
         return;
       }
 
-      // Buy confirmed
       if (d.msg_type === "buy" && d.buy) {
         clearTimeout(buyTimeout);
         buyResolved = true;
@@ -108,14 +108,12 @@ export async function executeTradeViaOTP(
         };
 
         if (onContractUpdate && result.contractId) {
-          // Subscribe to live P&L on the same authenticated session
           ws.send(JSON.stringify({
             proposal_open_contract: 1,
             contract_id: result.contractId,
             subscribe: 1,
             req_id: 2,
           }));
-          // Safety timeout: close WS after 12 minutes regardless
           monitorTimer = setTimeout(() => ws.close(), 12 * 60 * 1000);
         } else {
           ws.close();
@@ -124,7 +122,6 @@ export async function executeTradeViaOTP(
         return;
       }
 
-      // Live P&L stream
       if (d.msg_type === "proposal_open_contract" && d.proposal_open_contract) {
         const poc = d.proposal_open_contract;
         const isSold    = poc.is_sold    === 1;
@@ -134,11 +131,14 @@ export async function executeTradeViaOTP(
 
         onContractUpdate?.({
           contractId:  poc.contract_id,
-          profit:      parseFloat(poc.profit      ?? "0"),
+          profit:      parseFloat(poc.profit            ?? "0"),
           profitPct:   parseFloat(poc.profit_percentage ?? "0"),
-          currentSpot: parseFloat(poc.current_spot ?? "0"),
+          currentSpot: parseFloat(poc.current_spot      ?? "0"),
           isSold:      isSold || isExpired,
           status,
+          dateExpiry:  poc.date_expiry  ?? 0,
+          bidPrice:    parseFloat(poc.bid_price ?? "0"),
+          payout:      parseFloat(poc.payout    ?? "0"),
         });
 
         if (isSold || isExpired) {
@@ -153,6 +153,65 @@ export async function executeTradeViaOTP(
       if (monitorTimer) clearTimeout(monitorTimer);
       ws.close();
       if (!buyResolved) reject(new Error("WebSocket connection to Deriv failed"));
+    };
+  });
+}
+
+export async function sellContract(
+  apiBase: string,
+  accountId: string,
+  contractId: number,
+): Promise<{ sellPrice: number }> {
+  const token = getAccessToken();
+  if (!token)     throw new Error("Not authenticated");
+  if (!accountId) throw new Error("No account selected");
+
+  const otpRes = await fetch(`${apiBase}/deriv/ws-token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accountId, accessToken: token }),
+  });
+  if (!otpRes.ok) {
+    const body = await otpRes.json().catch(() => ({}));
+    throw new Error(body.error || `Failed to get sell session (${otpRes.status})`);
+  }
+  const { wsUrl } = await otpRes.json();
+  if (!wsUrl) throw new Error("Backend returned no WebSocket URL");
+
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(wsUrl);
+
+    const timeout = setTimeout(() => {
+      ws.close();
+      reject(new Error("Sell timed out (15s)"));
+    }, 15_000);
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ sell: contractId, price: 0, req_id: 1 }));
+    };
+
+    ws.onmessage = (ev) => {
+      let d: any;
+      try { d = JSON.parse(ev.data as string); } catch { return; }
+
+      if (d.error) {
+        clearTimeout(timeout);
+        ws.close();
+        reject(new Error(d.error.message || JSON.stringify(d.error)));
+        return;
+      }
+
+      if (d.msg_type === "sell" && d.sell) {
+        clearTimeout(timeout);
+        ws.close();
+        resolve({ sellPrice: parseFloat(d.sell.sold_for ?? "0") });
+      }
+    };
+
+    ws.onerror = () => {
+      clearTimeout(timeout);
+      ws.close();
+      reject(new Error("WebSocket sell connection failed"));
     };
   });
 }
