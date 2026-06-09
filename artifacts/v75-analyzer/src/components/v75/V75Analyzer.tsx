@@ -4,7 +4,7 @@ import {
   initiateLogin, handleOAuthCallback, clearAccessToken, getAccessToken,
   authorizeAndGetAccounts, type DerivAccount,
 } from "@/lib/v75/derivAuth";
-import { executeTradeViaOTP, type DurationUnit, DURATION_LIMITS } from "@/lib/v75/derivTrade";
+import { executeTradeViaOTP, type DurationUnit, type ContractUpdate, DURATION_LIMITS } from "@/lib/v75/derivTrade";
 import type { Candle, Signal, SnapbackSignal, EngineState } from "@/lib/v75/types";
 import { computeATR } from "@/lib/v75/indicators";
 import MomentumEngine, { type MomentumMetrics } from "@/lib/v75/momentumEngine";
@@ -24,6 +24,9 @@ type AuthStatus = "not-connected" | "connecting" | "connected" | "error";
 interface ContractRecord {
   signalId: string; contractId: number; direction: "RISE" | "FALL";
   signalPrice: number; derivPrice: number; slippage: number; timestamp: number;
+  profit: number; profitPct: number;
+  status: "open" | "sold" | "expired";
+  isSold: boolean;
 }
 
 // ── Z-Score Goldilocks Gauge ──────────────────────────────────────────────────
@@ -209,25 +212,41 @@ function GateRow({ label, met, value, sub }: { label: string; met: boolean; valu
 function SignalRow({ sig, contract }: { sig: SnapbackSignal; contract?: ContractRecord }) {
   const isRise = sig.direction === "RISE";
   const time = new Date(sig.timestamp).toLocaleTimeString("en-US", { hour12: false });
+  const hasLivePnl = contract && !contract.isSold && contract.status === "open";
+  const hasFinalPnl = contract && contract.isSold;
+  const pnlColor = (contract?.profit ?? 0) >= 0 ? "#10b981" : "#f43f5e";
   return (
     <div className="py-2 border-b border-zinc-800/60 text-xs font-mono space-y-1">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <span className={`px-1.5 py-0.5 rounded font-bold ${isRise ? "bg-emerald-500/15 text-emerald-300" : "bg-rose-500/15 text-rose-300"}`}>{isRise ? "▲ RISE" : "▼ FALL"}</span>
         <span className="text-zinc-400">{time}</span>
         <span className="text-zinc-300">{fmt2(sig.entryPrice)}</span>
         <span className="text-zinc-500">Z={sig.zScore >= 0 ? "+" : ""}{sig.zScore.toFixed(2)}</span>
         <span className="text-zinc-500">H={sig.hurstExponent.toFixed(2)}</span>
         <span className="text-zinc-500">DTI={(sig.dti ?? 0) >= 0 ? "+" : ""}{(sig.dti ?? 0).toFixed(2)}</span>
+        {hasLivePnl && (
+          <span className="font-bold animate-pulse" style={{ color: pnlColor }}>
+            {(contract.profit >= 0 ? "+" : "")}{contract.profit.toFixed(2)} ({contract.profitPct >= 0 ? "+" : ""}{contract.profitPct.toFixed(1)}%)
+          </span>
+        )}
+        {hasFinalPnl && (
+          <span className="font-bold" style={{ color: pnlColor }}>
+            {(contract.profit >= 0 ? "+" : "")}{contract.profit.toFixed(2)} FINAL
+          </span>
+        )}
         <span className={`ml-auto px-1.5 py-0.5 rounded text-[10px] ${sig.outcome === "WIN" ? "bg-emerald-500/15 text-emerald-400" : sig.outcome === "LOSS" ? "bg-rose-500/15 text-rose-400" : "bg-zinc-700/40 text-zinc-400"}`}>{sig.outcome}</span>
       </div>
       {contract && (
-        <div className="flex items-center gap-4 pl-1 text-[10px] text-zinc-500">
+        <div className="flex items-center gap-4 pl-1 text-[10px] text-zinc-500 flex-wrap">
           <span className="text-violet-400">#{contract.contractId}</span>
           <span>Signal: {fmt2(contract.signalPrice)}</span>
           <span>Exec: {fmt2(contract.derivPrice)}</span>
           <span className={Math.abs(contract.slippage) > 0.5 ? "text-amber-400" : ""}>
             Slip: {contract.slippage >= 0 ? "+" : ""}{contract.slippage.toFixed(4)}
           </span>
+          {contract.status !== "open" && (
+            <span className={`px-1 py-0.5 rounded uppercase ${contract.status === "sold" ? "text-cyan-400 bg-cyan-500/10" : "text-zinc-400 bg-zinc-700/30"}`}>{contract.status}</span>
+          )}
         </div>
       )}
     </div>
@@ -578,11 +597,26 @@ export function V75Analyzer() {
     setExecError("");
     try {
       const contractType = sig.direction === "RISE" ? "CALL" : "PUT";
-      const result = await executeTradeViaOTP(API, acctId, contractType, stake, dur, durUnit);
+      const onUpdate = (update: ContractUpdate) => {
+        setContracts(prev => prev.map(c =>
+          c.contractId === update.contractId
+            ? { ...c, profit: update.profit, profitPct: update.profitPct, status: update.status, isSold: update.isSold }
+            : c,
+        ));
+        if (update.isSold) {
+          const outcome: "WIN" | "LOSS" = update.profit >= 0 ? "WIN" : "LOSS";
+          setSignals(prev => prev.map(s =>
+            s.id === sig.id ? { ...s, outcome, exitPrice: update.currentSpot } : s,
+          ));
+          updateSignalOutcome(sig.id, outcome, update.currentSpot);
+        }
+      };
+      const result = await executeTradeViaOTP(API, acctId, contractType, stake, dur, durUnit, onUpdate);
       setContracts(prev => [{
         signalId: sig.id, contractId: result.contractId, direction: sig.direction,
         signalPrice: sig.entryPrice, derivPrice: result.buyPrice,
         slippage: result.buyPrice - sig.entryPrice, timestamp: Date.now(),
+        profit: 0, profitPct: 0, status: "open" as const, isSold: false,
       }, ...prev].slice(0, 50));
     } catch (e: any) {
       setExecError(e?.message ?? "Trade execution failed");
@@ -608,12 +642,21 @@ export function V75Analyzer() {
     setExecError("");
     try {
       const contractType = direction === "RISE" ? "CALL" : "PUT";
-      const result = await executeTradeViaOTP(API, acctId, contractType, stake, dur, durUnit);
+      const manualId = `manual-${Date.now()}`;
+      const onUpdate = (update: ContractUpdate) => {
+        setContracts(prev => prev.map(c =>
+          c.contractId === update.contractId
+            ? { ...c, profit: update.profit, profitPct: update.profitPct, status: update.status, isSold: update.isSold }
+            : c,
+        ));
+      };
+      const result = await executeTradeViaOTP(API, acctId, contractType, stake, dur, durUnit, onUpdate);
       const p = priceRef.current;
       setContracts(prev => [{
-        signalId: `manual-${Date.now()}`, contractId: result.contractId, direction,
+        signalId: manualId, contractId: result.contractId, direction,
         signalPrice: p, derivPrice: result.buyPrice,
         slippage: result.buyPrice - p, timestamp: Date.now(),
+        profit: 0, profitPct: 0, status: "open" as const, isSold: false,
       }, ...prev].slice(0, 50));
     } catch (e: any) {
       setExecError(e?.message ?? "Trade execution failed");
@@ -638,7 +681,8 @@ export function V75Analyzer() {
     const entryPrice = sig.entryPrice;
     setTimeout(() => {
       setSignals(cur => cur.map(s => {
-        if (s.id !== sig.id) return s;
+        // Skip if already settled by live API monitoring
+        if (s.id !== sig.id || s.outcome !== "PENDING") return s;
         const won = (s.direction === "RISE" && tickPrice >= entryPrice) ||
                     (s.direction === "FALL" && tickPrice <= entryPrice);
         const outcome: "WIN" | "LOSS" = won ? "WIN" : "LOSS";
