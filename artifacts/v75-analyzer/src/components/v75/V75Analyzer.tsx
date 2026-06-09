@@ -10,6 +10,9 @@ import { computeATR } from "@/lib/v75/indicators";
 import MomentumEngine, { type MomentumMetrics } from "@/lib/v75/momentumEngine";
 import { saveSignal, updateSignalOutcome, loadSignals, flushQueue } from "@/lib/v75/storage";
 import { DerivOptionTicket } from "./DerivOptionTicket";
+import { BacktestPanel } from "./BacktestPanel";
+
+type AppTab = "LIVE" | "BACKTEST";
 
 const engine = new MomentumEngine();
 const BASE   = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -816,6 +819,7 @@ function AuthPanel({
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function V75Analyzer() {
+  const [activeTab, setActiveTab] = useState<AppTab>("LIVE");
   const [conn, setConn]               = useState<ConnState>("connecting");
   const [price, setPrice]             = useState(0);
   const [lastTickMs, setLastTickMs]   = useState(Date.now());
@@ -1054,11 +1058,24 @@ export function V75Analyzer() {
     <div className="min-h-screen bg-[#090912] text-white font-sans">
       {/* ── Top bar ── */}
       <div className="border-b border-zinc-800/80 px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <div className="w-1.5 h-8 rounded-full bg-violet-500" />
           <div>
             <div className="text-xs font-semibold tracking-widest text-zinc-400 uppercase">5-Layer Microstructure Classifier · Command Center</div>
             <div className="text-[10px] text-zinc-600">V75 · Momentum Continuation · 120s Horizon</div>
+          </div>
+          {/* Tab switcher */}
+          <div className="flex rounded-lg overflow-hidden border border-zinc-700 ml-2">
+            <button
+              onClick={() => setActiveTab("LIVE")}
+              className={`px-4 py-1.5 text-xs font-semibold tracking-wide transition-colors ${activeTab === "LIVE" ? "bg-violet-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"}`}>
+              ● LIVE
+            </button>
+            <button
+              onClick={() => setActiveTab("BACKTEST")}
+              className={`px-4 py-1.5 text-xs font-semibold tracking-wide transition-colors ${activeTab === "BACKTEST" ? "bg-violet-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"}`}>
+              ▶ BACKTEST
+            </button>
           </div>
         </div>
         <div className="flex items-center gap-5">
@@ -1095,7 +1112,9 @@ export function V75Analyzer() {
         </div>
       </div>
 
-      <div className="p-5 flex gap-5">
+      {activeTab === "BACKTEST" && <BacktestPanel />}
+
+      <div className={`p-5 flex gap-5 ${activeTab === "BACKTEST" ? "hidden" : ""}`}>
         {/* ── Main content ── */}
         <div className="flex-1 min-w-0 space-y-4">
 
