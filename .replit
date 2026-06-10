@@ -70,3 +70,8 @@ externalPort = 3000
 
 [nix]
 packages = ["zip"]
+
+[userenv]
+
+[userenv.shared]
+VITE_DERIV_APP_ID = "33vW8wqPMzOZsHKekI9P2"
