@@ -13,10 +13,56 @@ const OAUTH_ENDPOINT = "https://oauth.deriv.com/oauth2/authorize";
 // WebSocket host used for token authorization + tick feed
 const DERIV_WS_HOST = "wss://api.derivws.com/trading/v1/options/ws/public";
 
-// Module-level token store — intentionally lost on page refresh (no localStorage)
+// Module-level token store
 let _accessToken: string | null = null;
 export const getAccessToken   = () => _accessToken;
 export const clearAccessToken = () => { _accessToken = null; };
+export const restoreToken     = (t: string) => { _accessToken = t; };
+
+// ── Persistent session (localStorage, 8-hour TTL) ────────────────────────────
+
+export const SESSION_TTL_HOURS = 8;
+const SESSION_KEY = "deriv_v75_session_v1";
+const SESSION_TTL_MS = SESSION_TTL_HOURS * 60 * 60 * 1000;
+
+export interface StoredSession {
+  token:             string;
+  expiresAt:         number;   // Unix ms
+  accounts:          DerivAccount[];
+  selectedAccountId: string;
+}
+
+export function saveSession(
+  token:             string,
+  accounts:          DerivAccount[],
+  selectedAccountId: string,
+): void {
+  try {
+    const session: StoredSession = {
+      token, accounts, selectedAccountId,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+    };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } catch { /* quota or private-mode — silently skip */ }
+}
+
+export function loadSession(): StoredSession | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const session: StoredSession = JSON.parse(raw);
+    if (Date.now() > session.expiresAt) {
+      localStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    return session;
+  } catch { return null; }
+}
+
+export function clearSession(): void {
+  try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+  _accessToken = null;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

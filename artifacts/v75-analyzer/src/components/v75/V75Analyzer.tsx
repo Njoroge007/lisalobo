@@ -3,6 +3,8 @@ import { DerivClient, type ConnState } from "@/lib/v75/deriv";
 import {
   initiateLogin, handleOAuthCallback, clearAccessToken, getAccessToken,
   authorizeAndGetAccounts, type DerivAccount,
+  saveSession, loadSession, clearSession, restoreToken,
+  SESSION_TTL_HOURS,
 } from "@/lib/v75/derivAuth";
 import { executeTradeViaOTP, sellContract, type DurationUnit, type ContractUpdate, DURATION_LIMITS } from "@/lib/v75/derivTrade";
 import type { Candle, Signal, SnapbackSignal, EngineState, LayerScores, SignalTier } from "@/lib/v75/types";
@@ -617,7 +619,7 @@ function AuthPanel({
   stakeAmount, setStakeAmount, tpLimit, setTpLimit, slLimit, setSlLimit,
   tradeDuration, setTradeDuration, tradeDurationUnit, setTradeDurationUnit,
   pendingManualSignal, manualCountdown, onManualExecute, onManualRise, onManualFall,
-  onLogin, onLogout, execError,
+  onLogin, onLogout, execError, sessionExpiresAt,
 }: {
   authStatus: AuthStatus; authError: string;
   accounts: DerivAccount[]; selectedAccountId: string; setSelectedAccountId: (id: string) => void;
@@ -630,6 +632,7 @@ function AuthPanel({
   pendingManualSignal: SnapbackSignal | null; manualCountdown: number;
   onManualExecute: () => void; onManualRise: () => void; onManualFall: () => void;
   onLogin: () => void; onLogout: () => void;
+  sessionExpiresAt: number | null;
   execError: string;
 }) {
   const selectedAccount  = accounts.find(a => a.id === selectedAccountId);
@@ -683,11 +686,18 @@ function AuthPanel({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                 <span className="text-xs font-semibold text-emerald-300">Connected</span>
               </div>
               <button onClick={onLogout} className="text-[10px] text-zinc-500 hover:text-zinc-300 underline">Logout</button>
             </div>
+            {sessionExpiresAt && (
+              <p className="text-[9px] text-zinc-600">
+                Session valid until{" "}
+                {new Date(sessionExpiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}{" "}
+                · auto-restored on refresh
+              </p>
+            )}
             {accounts.length > 1 ? (
               <select value={selectedAccountId} onChange={e => setSelectedAccountId(e.target.value)}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-violet-500">
@@ -834,6 +844,7 @@ export function V75Analyzer() {
   const [authError, setAuthError]               = useState("");
   const [accounts, setAccounts]                 = useState<DerivAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(null);
 
   const [executionMode, setExecutionMode]       = useState<ExecMode>("MANUAL");
   const [stakeAmount, setStakeAmount]           = useState(10);
@@ -861,20 +872,65 @@ export function V75Analyzer() {
   useEffect(() => { selectedAccountRef.current  = selectedAccountId; }, [selectedAccountId]);
   useEffect(() => { pendingManualRef.current    = pendingManualSignal; }, [pendingManualSignal]);
 
-  // OAuth callback
+  // ── Auth startup: OAuth callback first, then saved-session restore ──────────
   useEffect(() => {
     (async () => {
+      // 1. Check for fresh Deriv redirect (acct1/token1 in URL)
       const result = await handleOAuthCallback(API);
-      if (result.status === "none") return;
-      if (result.status === "error") { setAuthStatus("not-connected"); setAuthError(result.message); return; }
+
+      if (result.status === "error") {
+        setAuthStatus("not-connected");
+        setAuthError(result.message);
+        return;
+      }
+
       if (result.status === "connected") {
         setAuthStatus("connecting");
         try {
           const token = getAccessToken()!;
           const data  = await authorizeAndGetAccounts(token, API);
-          setAccounts(data); setSelectedAccountId(data[0]?.id ?? "");
-          selectedAccountRef.current = data[0]?.id ?? ""; setAuthStatus("connected");
-        } catch (e: any) { setAuthStatus("not-connected"); setAuthError(e?.message ?? "Failed to load accounts"); }
+          const primaryId = data[0]?.id ?? "";
+          setAccounts(data);
+          setSelectedAccountId(primaryId);
+          selectedAccountRef.current = primaryId;
+          saveSession(token, data, primaryId);
+          const exp = Date.now() + SESSION_TTL_HOURS * 60 * 60 * 1000;
+          setSessionExpiresAt(exp);
+          setAuthStatus("connected");
+        } catch (e: any) {
+          clearSession();
+          setAuthStatus("not-connected");
+          setAuthError(e?.message ?? "Failed to load accounts");
+        }
+        return;
+      }
+
+      // 2. No fresh redirect — try restoring a saved session
+      const stored = loadSession();
+      if (!stored) return;
+
+      // Show cached accounts immediately so UI feels instant
+      restoreToken(stored.token);
+      setAccounts(stored.accounts);
+      setSelectedAccountId(stored.selectedAccountId);
+      selectedAccountRef.current = stored.selectedAccountId;
+      setSessionExpiresAt(stored.expiresAt);
+      setAuthStatus("connecting");
+
+      // Re-verify token is still valid via WebSocket
+      try {
+        const freshData = await authorizeAndGetAccounts(stored.token, API);
+        setAccounts(freshData);
+        const primaryId = freshData[0]?.id ?? stored.selectedAccountId;
+        saveSession(stored.token, freshData, primaryId);
+        setSelectedAccountId(primaryId);
+        selectedAccountRef.current = primaryId;
+        setAuthStatus("connected");
+      } catch {
+        clearSession();
+        setAuthStatus("not-connected");
+        setSessionExpiresAt(null);
+        setAuthError("Session expired — please log in again.");
       }
     })();
   }, []);
@@ -1209,8 +1265,9 @@ export function V75Analyzer() {
             onManualRise={() => fireDirectionTrade("RISE")}
             onManualFall={() => fireDirectionTrade("FALL")}
             onLogin={initiateLogin}
-            onLogout={() => { clearAccessToken(); setAuthStatus("not-connected"); setAccounts([]); setSelectedAccountId(""); setAuthError(""); }}
+            onLogout={() => { clearSession(); setAuthStatus("not-connected"); setAccounts([]); setSelectedAccountId(""); setAuthError(""); setSessionExpiresAt(null); }}
             execError={execError}
+            sessionExpiresAt={sessionExpiresAt}
           />
         </div>
       </div>
