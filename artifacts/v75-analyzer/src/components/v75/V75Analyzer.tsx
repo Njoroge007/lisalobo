@@ -4,7 +4,7 @@ import {
   initiateLogin, handleOAuthCallback, clearAccessToken, getAccessToken,
   authorizeAndGetAccounts, type DerivAccount,
   saveSession, loadSession, clearSession, restoreToken,
-  SESSION_TTL_HOURS, connectWithApiToken,
+  SESSION_TTL_HOURS,
 } from "@/lib/v75/derivAuth";
 import { executeTradeViaOTP, sellContract, type DurationUnit, type ContractUpdate, DURATION_LIMITS } from "@/lib/v75/derivTrade";
 import type { Candle, Signal, SnapbackSignal, EngineState, LayerScores, SignalTier } from "@/lib/v75/types";
@@ -619,7 +619,7 @@ function AuthPanel({
   stakeAmount, setStakeAmount, tpLimit, setTpLimit, slLimit, setSlLimit,
   tradeDuration, setTradeDuration, tradeDurationUnit, setTradeDurationUnit,
   pendingManualSignal, manualCountdown, onManualExecute, onManualRise, onManualFall,
-  onLogin, onApiTokenConnect, apiTokenConnecting, onLogout, execError, sessionExpiresAt,
+  onLogin, onLogout, execError, sessionExpiresAt,
 }: {
   authStatus: AuthStatus; authError: string;
   accounts: DerivAccount[]; selectedAccountId: string; setSelectedAccountId: (id: string) => void;
@@ -631,13 +631,10 @@ function AuthPanel({
   tradeDurationUnit: DurationUnit; setTradeDurationUnit: (u: DurationUnit) => void;
   pendingManualSignal: SnapbackSignal | null; manualCountdown: number;
   onManualExecute: () => void; onManualRise: () => void; onManualFall: () => void;
-  onLogin: () => void; onApiTokenConnect: (t: string) => void; apiTokenConnecting: boolean;
-  onLogout: () => void;
+  onLogin: () => void; onLogout: () => void;
   sessionExpiresAt: number | null;
   execError: string;
 }) {
-  const [apiToken, setApiToken]   = useState("");
-  const [showToken, setShowToken] = useState(false);
   const selectedAccount  = accounts.find(a => a.id === selectedAccountId);
   const canManualExecute = pendingManualSignal !== null && manualCountdown > 0 && authStatus === "connected";
   const safeUnit: DurationUnit = tradeDurationUnit ?? "m";
@@ -649,61 +646,22 @@ function AuthPanel({
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
         <div className="text-xs uppercase tracking-widest text-zinc-500">Auth Status</div>
         {authStatus === "not-connected" && (
-          <div className="space-y-3">
+          <>
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-zinc-500" />
               <span className="text-xs font-semibold text-zinc-400">Not Connected</span>
             </div>
             {authError && <p className="text-[10px] text-rose-400">{authError}</p>}
-
-            {/* ── Option A: API Token (primary — always works) ── */}
-            <div className="bg-zinc-800/60 border border-zinc-700/60 rounded-lg p-3 space-y-2">
-              <div className="text-[10px] uppercase tracking-wider text-violet-400 font-semibold">API Token (Recommended)</div>
-              <p className="text-[10px] text-zinc-500 leading-relaxed">
-                Create a token at <span className="text-zinc-300">app.deriv.com → Settings → API Token</span> with <span className="text-emerald-400">Trade</span> + <span className="text-emerald-400">Read</span> scopes, then paste it below.
-              </p>
-              <div className="relative">
-                <input
-                  type={showToken ? "text" : "password"}
-                  value={apiToken}
-                  onChange={e => setApiToken(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && apiToken.trim() && onApiTokenConnect(apiToken.trim())}
-                  placeholder="a1-xxxxxxxxxxxxxxxxxxxxxxxx"
-                  className="w-full bg-zinc-900 border border-zinc-600 rounded px-2.5 py-2 text-xs font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-violet-500 pr-8"
-                />
-                <button
-                  onClick={() => setShowToken(v => !v)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 text-[10px]">
-                  {showToken ? "hide" : "show"}
-                </button>
-              </div>
-              <button
-                onClick={() => apiToken.trim() && onApiTokenConnect(apiToken.trim())}
-                disabled={!apiToken.trim() || apiTokenConnecting}
-                className="w-full py-2 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition-colors flex items-center justify-center gap-2">
-                {apiTokenConnecting
-                  ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Connecting…</>
-                  : "Connect Account"}
-              </button>
-            </div>
-
-            {/* ── Option B: OAuth redirect (requires registered Deriv app) ── */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                <div className="flex-1 h-px bg-zinc-700" />
-                <span className="text-[9px] text-zinc-600 uppercase tracking-wider">or</span>
-                <div className="flex-1 h-px bg-zinc-700" />
-              </div>
-              <button onClick={onLogin}
-                className="flex items-center justify-center gap-2 w-full py-2 px-4 rounded-lg bg-[#ff444f] hover:bg-[#e03040] transition-colors text-white text-xs font-semibold">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-                </svg>
-                Login with Deriv OAuth
-              </button>
-              <p className="text-[9px] text-zinc-600 text-center">Requires a registered OAuth app on developers.deriv.com</p>
-            </div>
-          </div>
+            <p className="text-xs text-zinc-500">Connect your Deriv account to enable live trade execution.</p>
+            <button onClick={onLogin}
+              className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-lg bg-[#ff444f] hover:bg-[#e03040] transition-colors text-white text-sm font-semibold">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+              </svg>
+              Login with Deriv
+            </button>
+            <p className="text-[10px] text-zinc-600 text-center">Deriv OAuth 2.0 — token never stored</p>
+          </>
         )}
         {authStatus === "connecting" && (
           <div className="space-y-2">
@@ -886,8 +844,7 @@ export function V75Analyzer() {
   const [authError, setAuthError]               = useState("");
   const [accounts, setAccounts]                 = useState<DerivAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("");
-  const [sessionExpiresAt, setSessionExpiresAt]     = useState<number | null>(null);
-  const [apiTokenConnecting, setApiTokenConnecting] = useState(false);
+  const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(null);
 
   const [executionMode, setExecutionMode]       = useState<ExecMode>("MANUAL");
   const [stakeAmount, setStakeAmount]           = useState(10);
@@ -914,28 +871,6 @@ export function V75Analyzer() {
   useEffect(() => { tradeDurationUnitRef.current = tradeDurationUnit; }, [tradeDurationUnit]);
   useEffect(() => { selectedAccountRef.current  = selectedAccountId; }, [selectedAccountId]);
   useEffect(() => { pendingManualRef.current    = pendingManualSignal; }, [pendingManualSignal]);
-
-  // ── API Token connect ──────────────────────────────────────────────────────
-  const handleApiTokenConnect = useCallback(async (token: string) => {
-    setApiTokenConnecting(true);
-    setAuthError("");
-    try {
-      const data = await connectWithApiToken(token, API);
-      const primaryId = data[0]?.id ?? "";
-      setAccounts(data);
-      setSelectedAccountId(primaryId);
-      selectedAccountRef.current = primaryId;
-      const exp = Date.now() + SESSION_TTL_HOURS * 60 * 60 * 1000;
-      saveSession(token, data, primaryId);
-      setSessionExpiresAt(exp);
-      setAuthStatus("connected");
-    } catch (e: any) {
-      setAuthError(e?.message ?? "Token connect failed — check token scopes");
-      setAuthStatus("not-connected");
-    } finally {
-      setApiTokenConnecting(false);
-    }
-  }, []);
 
   // ── Auth startup: OAuth callback first, then saved-session restore ──────────
   useEffect(() => {
@@ -1330,8 +1265,6 @@ export function V75Analyzer() {
             onManualRise={() => fireDirectionTrade("RISE")}
             onManualFall={() => fireDirectionTrade("FALL")}
             onLogin={initiateLogin}
-            onApiTokenConnect={handleApiTokenConnect}
-            apiTokenConnecting={apiTokenConnecting}
             onLogout={() => { clearSession(); setAuthStatus("not-connected"); setAccounts([]); setSelectedAccountId(""); setAuthError(""); setSessionExpiresAt(null); }}
             execError={execError}
             sessionExpiresAt={sessionExpiresAt}
