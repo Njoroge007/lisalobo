@@ -4,7 +4,7 @@ import {
   initiateLogin, handleOAuthCallback, clearAccessToken, getAccessToken,
   authorizeAndGetAccounts, type DerivAccount,
   saveSession, loadSession, clearSession, restoreToken,
-  SESSION_TTL_HOURS,
+  SESSION_TTL_HOURS, appIdStatus, getDiagLog, type DiagEntry,
 } from "@/lib/v75/derivAuth";
 import { executeTradeViaOTP, sellContract, type DurationUnit, type ContractUpdate, DURATION_LIMITS } from "@/lib/v75/derivTrade";
 import type { Candle, Signal, SnapbackSignal, EngineState, LayerScores, SignalTier } from "@/lib/v75/types";
@@ -619,7 +619,7 @@ function AuthPanel({
   stakeAmount, setStakeAmount, tpLimit, setTpLimit, slLimit, setSlLimit,
   tradeDuration, setTradeDuration, tradeDurationUnit, setTradeDurationUnit,
   pendingManualSignal, manualCountdown, onManualExecute, onManualRise, onManualFall,
-  onLogin, onLogout, execError, sessionExpiresAt,
+  onLogin, onLogout, execError, sessionExpiresAt, diagLog,
 }: {
   authStatus: AuthStatus; authError: string;
   accounts: DerivAccount[]; selectedAccountId: string; setSelectedAccountId: (id: string) => void;
@@ -634,7 +634,9 @@ function AuthPanel({
   onLogin: () => void; onLogout: () => void;
   sessionExpiresAt: number | null;
   execError: string;
+  diagLog: DiagEntry[];
 }) {
+  const [showDiag, setShowDiag] = useState(false);
   const selectedAccount  = accounts.find(a => a.id === selectedAccountId);
   const canManualExecute = pendingManualSignal !== null && manualCountdown > 0 && authStatus === "connected";
   const safeUnit: DurationUnit = tradeDurationUnit ?? "m";
@@ -651,7 +653,25 @@ function AuthPanel({
               <span className="w-2 h-2 rounded-full bg-zinc-500" />
               <span className="text-xs font-semibold text-zinc-400">Not Connected</span>
             </div>
-            {authError && <p className="text-[10px] text-rose-400">{authError}</p>}
+            {authError && (
+              <div className="bg-rose-950/50 border border-rose-800/60 rounded-lg px-3 py-2">
+                <p className="text-[10px] text-rose-300 leading-relaxed">{authError}</p>
+              </div>
+            )}
+            {appIdStatus() !== "valid" && (
+              <div className="bg-amber-950/50 border border-amber-700/60 rounded-lg px-3 py-2 space-y-1">
+                <p className="text-[10px] text-amber-300 font-semibold">⚠ App ID not configured</p>
+                <p className="text-[9px] text-amber-500 leading-relaxed">
+                  To use OAuth, register an app at{" "}
+                  <span className="text-amber-300">app.deriv.com → Settings → API Token → Apps</span>
+                  , set redirect URL to{" "}
+                  <span className="font-mono text-amber-200">https://lisalobo--gomamoja.replit.app/</span>
+                  , then add the numeric app_id as{" "}
+                  <span className="font-mono text-amber-200">VITE_DERIV_APP_ID</span>{" "}
+                  in Replit Secrets.
+                </p>
+              </div>
+            )}
             <p className="text-xs text-zinc-500">Connect your Deriv account to enable live trade execution.</p>
             <button onClick={onLogin}
               className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-lg bg-[#ff444f] hover:bg-[#e03040] transition-colors text-white text-sm font-semibold">
@@ -660,7 +680,7 @@ function AuthPanel({
               </svg>
               Login with Deriv
             </button>
-            <p className="text-[10px] text-zinc-600 text-center">Deriv OAuth 2.0 — token never stored</p>
+            <p className="text-[10px] text-zinc-600 text-center">Deriv OAuth 2.0 — redirects back here after login</p>
           </>
         )}
         {authStatus === "connecting" && (
@@ -676,11 +696,39 @@ function AuthPanel({
           <>
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-rose-500" />
-              <span className="text-xs font-semibold text-rose-400">Error</span>
+              <span className="text-xs font-semibold text-rose-400">Auth Error</span>
             </div>
-            <p className="text-[10px] text-rose-400">{authError}</p>
+            <div className="bg-rose-950/50 border border-rose-800/60 rounded-lg px-3 py-2">
+              <p className="text-[10px] text-rose-300 leading-relaxed">{authError}</p>
+            </div>
             <button onClick={onLogin} className="w-full py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 transition-colors">Try Again</button>
           </>
+        )}
+        {/* ── Diagnostics ───────────────────────────────────────────── */}
+        {diagLog.length > 0 && (
+          <div className="border-t border-zinc-800 pt-2">
+            <button
+              onClick={() => setShowDiag(v => !v)}
+              className="flex items-center justify-between w-full text-[9px] uppercase tracking-wider text-zinc-600 hover:text-zinc-400 transition-colors">
+              <span>OAuth Diagnostics</span>
+              <span>{showDiag ? "▲" : "▼"}</span>
+            </button>
+            {showDiag && (
+              <div className="mt-1.5 space-y-0.5 max-h-40 overflow-y-auto">
+                {diagLog.map((e, i) => (
+                  <div key={i} className="flex gap-1.5 items-start">
+                    <span className={`text-[9px] shrink-0 ${
+                      e.level === "error" ? "text-rose-400" :
+                      e.level === "warn"  ? "text-amber-400" : "text-emerald-500"
+                    }`}>
+                      {e.level === "error" ? "✗" : e.level === "warn" ? "⚠" : "✓"}
+                    </span>
+                    <span className="text-[9px] text-zinc-500 leading-tight">{e.msg}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
         {authStatus === "connected" && selectedAccount && (
           <div className="space-y-2">
@@ -845,6 +893,7 @@ export function V75Analyzer() {
   const [accounts, setAccounts]                 = useState<DerivAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(null);
+  const [diagLog, setDiagLog]                   = useState<DiagEntry[]>([]);
 
   const [executionMode, setExecutionMode]       = useState<ExecMode>("MANUAL");
   const [stakeAmount, setStakeAmount]           = useState(10);
@@ -872,6 +921,18 @@ export function V75Analyzer() {
   useEffect(() => { selectedAccountRef.current  = selectedAccountId; }, [selectedAccountId]);
   useEffect(() => { pendingManualRef.current    = pendingManualSignal; }, [pendingManualSignal]);
 
+  // ── Login handler — wraps initiateLogin with error capture ───────────────────
+  const handleLogin = useCallback(() => {
+    try {
+      initiateLogin();
+      // If initiateLogin throws (missing/invalid app_id) it won't redirect —
+      // error is caught below and shown in the dashboard.
+    } catch (e: any) {
+      setAuthError(e?.message ?? "Login failed — check VITE_DERIV_APP_ID");
+      setDiagLog(getDiagLog());
+    }
+  }, []);
+
   // ── Auth startup: OAuth callback first, then saved-session restore ──────────
   useEffect(() => {
     (async () => {
@@ -881,11 +942,13 @@ export function V75Analyzer() {
       if (result.status === "error") {
         setAuthStatus("not-connected");
         setAuthError(result.message);
+        setDiagLog(getDiagLog());
         return;
       }
 
       if (result.status === "connected") {
         setAuthStatus("connecting");
+        setDiagLog(getDiagLog());
         try {
           const token = getAccessToken()!;
           const data  = await authorizeAndGetAccounts(token, API);
@@ -897,10 +960,12 @@ export function V75Analyzer() {
           const exp = Date.now() + SESSION_TTL_HOURS * 60 * 60 * 1000;
           setSessionExpiresAt(exp);
           setAuthStatus("connected");
+          setDiagLog(getDiagLog());
         } catch (e: any) {
           clearSession();
           setAuthStatus("not-connected");
-          setAuthError(e?.message ?? "Failed to load accounts");
+          setAuthError(e?.message ?? "Failed to load accounts after OAuth");
+          setDiagLog(getDiagLog());
         }
         return;
       }
@@ -1264,10 +1329,11 @@ export function V75Analyzer() {
             onManualExecute={handleManualExecute}
             onManualRise={() => fireDirectionTrade("RISE")}
             onManualFall={() => fireDirectionTrade("FALL")}
-            onLogin={initiateLogin}
-            onLogout={() => { clearSession(); setAuthStatus("not-connected"); setAccounts([]); setSelectedAccountId(""); setAuthError(""); setSessionExpiresAt(null); }}
+            onLogin={handleLogin}
+            onLogout={() => { clearSession(); setAuthStatus("not-connected"); setAccounts([]); setSelectedAccountId(""); setAuthError(""); setSessionExpiresAt(null); setDiagLog([]); }}
             execError={execError}
             sessionExpiresAt={sessionExpiresAt}
+            diagLog={diagLog}
           />
         </div>
       </div>

@@ -1,0 +1,129 @@
+AUTH 2.0 FIX REQUIRED
+
+Problem:
+
+The application successfully launches Deriv OAuth, but after authentication the user is taken to the Deriv trading platform instead of remaining inside the v75-analyzer application.
+
+Desired behavior:
+
+The application should use Deriv Auth 2.0 only as an authentication provider.
+
+After successful authorization, the user must return directly to the v75-analyzer dashboard.
+
+All trading activity must occur exclusively inside v75-analyzer.
+
+The Deriv platform should never become the user's primary interface.
+
+Current Configuration
+
+App ID:
+33vW8wqPMzOZsHKekI9P2
+
+Redirect URL:
+https://lisalobo--gomamoja.replit.app/
+
+Required Implementation
+
+1. Audit the entire OAuth flow.
+
+2. Verify that Login with Deriv generates a proper OAuth authorization request.
+
+3. Verify that the redirect_uri exactly matches:
+
+https://lisalobo--gomamoja.replit.app/
+
+4. Create a dedicated OAuth callback handler.
+
+Example:
+
+/auth/callback
+
+or equivalent route.
+
+5. When Deriv redirects back with an authorization code:
+
+?code=...
+
+Immediately exchange the code for access credentials.
+
+Do not leave the user on a Deriv page.
+
+6. Store authorization securely in application session state.
+
+Do not require the Deriv platform UI after authentication.
+
+7. After successful token exchange:
+
+Redirect automatically to:
+
+/dashboard
+
+or the main analyzer page.
+
+8. Update Auth Status widget.
+
+Before login:
+
+Not Connected
+
+After login:
+
+Connected
+
+Account ID
+Account Type
+Currency
+
+9. Ensure WebSocket trading uses the authenticated account session created by OAuth.
+
+10. Remove any dependency that opens the Deriv trading terminal after authentication.
+
+11. Add diagnostic logging:
+
+OAuth Started
+
+OAuth Callback Received
+
+Authorization Code Received
+
+Token Exchange Successful
+
+Account Loaded
+
+Trading Session Active
+
+12. If OAuth succeeds but callback fails, show a visible error in the dashboard instead of leaving the user on a Deriv page.
+
+Verification Checklist
+
+✓ Click Login with Deriv
+
+✓ Authorize account
+
+✓ Return automatically to v75-analyzer
+
+✓ Dashboard shows Connected
+
+✓ Account information displayed
+
+✓ No Deriv trading platform opens
+
+✓ WebSocket authenticated
+
+✓ Trades can be executed entirely from v75-analyzer
+
+✓ OAuth session persists until logout
+
+Deliverables
+
+1. Fixed OAuth 2.0 flow
+
+2. Callback route
+
+3. Session management
+
+4. Connection diagnostics
+
+5. Dashboard connection status
+
+6. End-to-end test confirming that authentication completes entirely inside v75-analyzer without requiring the Deriv platform UI

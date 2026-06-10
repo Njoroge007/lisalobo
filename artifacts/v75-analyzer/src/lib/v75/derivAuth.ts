@@ -1,19 +1,46 @@
-// ── Deriv OAuth 2.0 — Token Redirect flow ─────────────────────────────────────
+// ── Deriv OAuth 2.0 — Token Redirect (Implicit) Flow ─────────────────────────
 //
-// Deriv does NOT use PKCE / authorization code exchange.
-// After the user logs in, Deriv redirects back to REDIRECT_URI with:
+// Deriv uses implicit OAuth — NOT auth-code exchange.
+// After the user authorises, Deriv redirects back to your registered redirect_uri with:
 //   ?acct1=CR12345&token1=a1-xxx...&cur1=USD
-//   &acct2=VRTC5678&token2=a1-yyy...&cur2=USD  (virtual account, if any)
-// We read the tokens directly from the URL — no backend call required.
+//   &acct2=VRTC5678&token2=a1-yyy...&cur2=USD  (demo account, if any)
+//
+// The redirect_uri is configured server-side in the Deriv developer portal for
+// the registered app_id — it is NOT passed as a URL parameter.
+//
+// Register your app → https://app.deriv.com/account/api-token → Apps tab
+// Set redirect URL  → https://lisalobo--gomamoja.replit.app/
+// Copy numeric app_id → set VITE_DERIV_APP_ID in Replit Secrets
 
-const APP_ID = "33vW8wqPMzOZsHKekI9P2";
-const REDIRECT_URI = "https://lisalobo--gomamoja.replit.app/";
+// ── Configuration ─────────────────────────────────────────────────────────────
+
+// Deriv numeric app_id — MUST be an integer from the Deriv developer portal.
+// Set VITE_DERIV_APP_ID in Replit Secrets (Settings → Secrets).
+const APP_ID: string =
+  (import.meta.env.VITE_DERIV_APP_ID as string | undefined) ?? "";
+
 const OAUTH_ENDPOINT = "https://oauth.deriv.com/oauth2/authorize";
 
-// WebSocket host used for token authorization + tick feed
-const DERIV_WS_HOST = "wss://api.derivws.com/trading/v1/options/ws/public";
+// Correct Deriv WebSocket endpoint — must include numeric app_id as query param
+const derivWsUrl = () => `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID || "1"}`;
 
-// Module-level token store
+// ── Diagnostic log ─────────────────────────────────────────────────────────────
+
+export type DiagEntry = { ts: number; level: "info" | "warn" | "error"; msg: string };
+const _diagLog: DiagEntry[] = [];
+
+function diag(level: DiagEntry["level"], msg: string) {
+  const entry: DiagEntry = { ts: Date.now(), level, msg };
+  _diagLog.push(entry);
+  const tag = level === "error" ? "❌" : level === "warn" ? "⚠️" : "✓";
+  console.log(`[Deriv Auth] ${tag} ${msg}`);
+}
+
+export const getDiagLog = (): DiagEntry[] => [..._diagLog];
+export const clearDiagLog = (): void => { _diagLog.length = 0; };
+
+// ── Module-level token store ──────────────────────────────────────────────────
+
 let _accessToken: string | null = null;
 export const getAccessToken   = () => _accessToken;
 export const clearAccessToken = () => { _accessToken = null; };
@@ -22,12 +49,12 @@ export const restoreToken     = (t: string) => { _accessToken = t; };
 // ── Persistent session (localStorage, 8-hour TTL) ────────────────────────────
 
 export const SESSION_TTL_HOURS = 8;
-const SESSION_KEY = "deriv_v75_session_v1";
+const SESSION_KEY  = "deriv_v75_session_v1";
 const SESSION_TTL_MS = SESSION_TTL_HOURS * 60 * 60 * 1000;
 
 export interface StoredSession {
   token:             string;
-  expiresAt:         number;   // Unix ms
+  expiresAt:         number;
   accounts:          DerivAccount[];
   selectedAccountId: string;
 }
@@ -43,7 +70,7 @@ export function saveSession(
       expiresAt: Date.now() + SESSION_TTL_MS,
     };
     localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  } catch { /* quota or private-mode — silently skip */ }
+  } catch { /* quota or private-mode */ }
 }
 
 export function loadSession(): StoredSession | null {
@@ -79,15 +106,40 @@ export type CallbackResult =
   | { status: "connected"; accessToken: string }
   | { status: "error";     message: string };
 
-// ── Initiate login — full-page redirect ───────────────────────────────────────
+// ── Validate app ID ──────────────────────────────────────────────────────────
+
+export function appIdStatus(): "valid" | "missing" | "invalid" {
+  if (!APP_ID) return "missing";
+  if (!/^\d+$/.test(APP_ID)) return "invalid";
+  return "valid";
+}
+
+// ── Initiate login — full-page redirect ──────────────────────────────────────
+//
+// Redirects to Deriv OAuth. After the user authorises, Deriv redirects back to
+// the redirect_uri registered for this app_id in the Deriv developer portal.
+// No redirect_uri param is sent — Deriv uses the registered one.
 
 export function initiateLogin() {
-  const params = new URLSearchParams({
-    app_id:       APP_ID,
-    redirect_uri: REDIRECT_URI,
-    l:            "en",
-  });
-  window.location.href = `${OAUTH_ENDPOINT}?${params.toString()}`;
+  const status = appIdStatus();
+  if (status === "missing") {
+    diag("error", "OAuth start failed — VITE_DERIV_APP_ID is not set");
+    throw new Error(
+      "VITE_DERIV_APP_ID is not configured.\n\n" +
+      "1. Register your app at app.deriv.com/account/api-token → Apps tab\n" +
+      "2. Set redirect URL to https://lisalobo--gomamoja.replit.app/\n" +
+      "3. Copy the numeric app_id\n" +
+      "4. Add VITE_DERIV_APP_ID=<your-id> in Replit Secrets"
+    );
+  }
+  if (status === "invalid") {
+    diag("warn", `APP_ID "${APP_ID}" is not a valid Deriv numeric ID — OAuth may fail`);
+  }
+
+  const params = new URLSearchParams({ app_id: APP_ID, l: "en", brand: "deriv" });
+  const url = `${OAUTH_ENDPOINT}?${params.toString()}`;
+  diag("info", `OAuth started → ${url}`);
+  window.location.href = url;
 }
 
 // ── Callback handler — parse tokens from Deriv redirect URL ──────────────────
@@ -97,20 +149,24 @@ export function initiateLogin() {
 // stores the token in module scope, then strips the params from the URL.
 
 export async function handleOAuthCallback(
-  _apiBase?: string, // kept for call-site compatibility — not used
+  _apiBase?: string,
 ): Promise<CallbackResult> {
   const url   = new URL(window.location.href);
   const error = url.searchParams.get("error");
 
-  // Always clean the URL so tokens don't linger in browser history
-  window.history.replaceState({}, "", window.location.pathname);
+  // Strip OAuth params from URL immediately so tokens don't linger in history
+  const hadParams = url.searchParams.has("acct1") || url.searchParams.has("error");
+  if (hadParams) {
+    window.history.replaceState({}, "", window.location.pathname);
+  }
 
   if (error) {
     const desc = url.searchParams.get("error_description") ?? "";
-    return { status: "error", message: `Deriv: ${error}${desc ? ` — ${desc}` : ""}` };
+    const msg = `Deriv OAuth error: ${error}${desc ? ` — ${desc}` : ""}`;
+    diag("error", `OAuth callback error — ${msg}`);
+    return { status: "error", message: msg };
   }
 
-  // Collect all acctN/tokenN/curN triplets
   interface RawAccount { loginId: string; token: string; currency: string }
   const rawAccounts: RawAccount[] = [];
 
@@ -127,15 +183,18 @@ export async function handleOAuthCallback(
 
   if (rawAccounts.length === 0) return { status: "none" };
 
-  // Prefer the first real account (loginId does not start with VRTC)
+  diag("info", `OAuth callback received — ${rawAccounts.length} account(s) in redirect`);
+
+  // Prefer first real account (loginId does not start with VRTC)
   const primary =
     rawAccounts.find(a => !a.loginId.startsWith("VRTC")) ?? rawAccounts[0];
 
+  diag("info", `Authorization code received — primary account: ${primary.loginId}`);
   _accessToken = primary.token;
   return { status: "connected", accessToken: primary.token };
 }
 
-// ── Normalize a Deriv `authorize` WebSocket response into DerivAccount[] ──────
+// ── Normalize a Deriv `authorize` WS response into DerivAccount[] ─────────────
 
 function normalizeAccounts(auth: any): DerivAccount[] {
   const currentLoginId: string  = auth.loginid  ?? "";
@@ -163,14 +222,23 @@ function normalizeAccounts(auth: any): DerivAccount[] {
   return accounts;
 }
 
-// ── Authorize via Deriv WebSocket and return account list + live balance ──────
+// ── Authorize via Deriv WebSocket and return account list + live balance ───────
 
 function authorizeViaDerivWS(token: string): Promise<DerivAccount[]> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(DERIV_WS_HOST);
-    const timeout = setTimeout(() => { ws.close(); reject(new Error("Authorize timed out after 12s")); }, 12_000);
+    const wsUrl = derivWsUrl();
+    diag("info", `Opening WS → ${wsUrl}`);
+    const ws = new WebSocket(wsUrl);
+    const timeout = setTimeout(() => {
+      ws.close();
+      diag("error", "WS authorize timed out after 12s");
+      reject(new Error("Authorize timed out — check your network"));
+    }, 12_000);
 
-    ws.onopen = () => ws.send(JSON.stringify({ authorize: token, req_id: 99 }));
+    ws.onopen = () => {
+      diag("info", "WS open — sending authorize");
+      ws.send(JSON.stringify({ authorize: token, req_id: 99 }));
+    };
 
     ws.onmessage = (ev) => {
       try {
@@ -179,14 +247,23 @@ function authorizeViaDerivWS(token: string): Promise<DerivAccount[]> {
         clearTimeout(timeout);
         ws.close();
         if (data.error) {
-          reject(new Error(data.error.message ?? "Authorization failed"));
+          const msg = data.error.message ?? "Authorization failed";
+          diag("error", `WS authorize error — ${msg}`);
+          reject(new Error(msg));
           return;
         }
-        resolve(normalizeAccounts(data.authorize));
+        const accs = normalizeAccounts(data.authorize);
+        diag("info", `Token exchange successful — account loaded: ${accs[0]?.loginId}`);
+        diag("info", "Trading session active");
+        resolve(accs);
       } catch { /* ignore parse errors */ }
     };
 
-    ws.onerror  = () => { clearTimeout(timeout); reject(new Error("WebSocket connection failed")); };
+    ws.onerror  = () => {
+      clearTimeout(timeout);
+      diag("error", "WS connection failed");
+      reject(new Error("WebSocket connection failed"));
+    };
     ws.onclose  = () => clearTimeout(timeout);
   });
 }
@@ -194,23 +271,8 @@ function authorizeViaDerivWS(token: string): Promise<DerivAccount[]> {
 // ── Public: authorize and return accounts ─────────────────────────────────────
 
 export async function authorizeAndGetAccounts(
-  token:   string,
-  _apiBase?: string,  // kept for call-site compat — not used
+  token:    string,
+  _apiBase?: string,
 ): Promise<DerivAccount[]> {
   return authorizeViaDerivWS(token);
-}
-
-// ── Direct API token connect (no OAuth needed) ────────────────────────────────
-// User creates a token at app.deriv.com/account/api-token with Trade + Read scope
-// and pastes it here. Works exactly like an OAuth token with the WS API.
-
-export async function connectWithApiToken(
-  token:   string,
-  apiBase: string,
-): Promise<DerivAccount[]> {
-  const trimmed = token.trim();
-  if (!trimmed) throw new Error("Token cannot be empty");
-  const accounts = await authorizeAndGetAccounts(trimmed, apiBase);
-  _accessToken = trimmed;
-  return accounts;
 }
