@@ -191,29 +191,26 @@ function authorizeViaDerivWS(token: string): Promise<DerivAccount[]> {
   });
 }
 
-// ── Public: authorize and return accounts (WS first, REST proxy fallback) ─────
+// ── Public: authorize and return accounts ─────────────────────────────────────
 
 export async function authorizeAndGetAccounts(
   token:   string,
+  _apiBase?: string,  // kept for call-site compat — not used
+): Promise<DerivAccount[]> {
+  return authorizeViaDerivWS(token);
+}
+
+// ── Direct API token connect (no OAuth needed) ────────────────────────────────
+// User creates a token at app.deriv.com/account/api-token with Trade + Read scope
+// and pastes it here. Works exactly like an OAuth token with the WS API.
+
+export async function connectWithApiToken(
+  token:   string,
   apiBase: string,
 ): Promise<DerivAccount[]> {
-  // 1. WebSocket authorize (same host as tick feed — works cross-origin in browser)
-  try {
-    const accounts = await authorizeViaDerivWS(token);
-    if (accounts.length > 0) return accounts;
-  } catch (_wsErr) {
-    // fall through to REST proxy
-  }
-
-  // 2. Backend REST proxy (fallback)
-  const res = await fetch(`${apiBase}/deriv/accounts`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `Accounts fetch failed (${res.status})`);
-  }
-
-  return res.json() as Promise<DerivAccount[]>;
+  const trimmed = token.trim();
+  if (!trimmed) throw new Error("Token cannot be empty");
+  const accounts = await authorizeAndGetAccounts(trimmed, apiBase);
+  _accessToken = trimmed;
+  return accounts;
 }
