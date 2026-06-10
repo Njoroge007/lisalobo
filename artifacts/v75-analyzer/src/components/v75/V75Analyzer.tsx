@@ -657,7 +657,7 @@ function AuthPanel({
               </svg>
               Login with Deriv
             </button>
-            <p className="text-[10px] text-zinc-600 text-center">OAuth 2.0 + PKCE — token never stored</p>
+            <p className="text-[10px] text-zinc-600 text-center">Deriv OAuth 2.0 — token never stored</p>
           </>
         )}
         {authStatus === "connecting" && (
@@ -666,7 +666,7 @@ function AuthPanel({
               <div className="w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
               <span className="text-xs font-semibold text-amber-300">Connecting…</span>
             </div>
-            <p className="text-[10px] text-zinc-500">Exchanging authorization code…</p>
+            <p className="text-[10px] text-zinc-500">Authorizing with Deriv…</p>
           </div>
         )}
         {authStatus === "error" && (
