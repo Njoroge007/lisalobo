@@ -109,8 +109,7 @@ export type CallbackResult =
 // ── Validate app ID ──────────────────────────────────────────────────────────
 
 export function appIdStatus(): "valid" | "missing" | "invalid" {
-  if (!APP_ID) return "missing";
-  if (!/^\d+$/.test(APP_ID)) return "invalid";
+  if (!APP_ID || APP_ID.trim() === "") return "missing";
   return "valid";
 }
 
